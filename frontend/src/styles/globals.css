@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Light mode (default) ─────────────────────────────────────────────────── */
+:root {
+  /* shadcn/ui design tokens — light */
+  --background:           210 40% 98%;
+  --foreground:           222 47% 11%;
+  --card:                 0 0% 100%;
+  --card-foreground:      222 47% 11%;
+  --popover:              0 0% 100%;
+  --popover-foreground:   222 47% 11%;
+  --primary:              142 76% 36%;
+  --primary-foreground:   144 85% 97%;
+  --secondary:            210 40% 93%;
+  --secondary-foreground: 222 47% 11%;
+  --muted:                210 40% 93%;
+  --muted-foreground:     215 16% 47%;
+  --accent:               210 40% 90%;
+  --accent-foreground:    222 47% 11%;
+  --destructive:          0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border:               214 32% 88%;
+  --input:                214 32% 88%;
+  --ring:                 142 76% 36%;
+  --radius:               0.5rem;
+
+  /* VPN theme — light */
+  --vpn-bg:     #f1f5f9;
+  --vpn-card:   #ffffff;
+  --vpn-border: #e2e8f0;
+
+  /* Text helpers for light */
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --text-muted:     #94a3b8;
+}
+
+/* ── Dark mode ────────────────────────────────────────────────────────────── */
+.dark {
+  /* shadcn/ui design tokens — dark */
+  --background:           222 47% 7%;
+  --foreground:           213 31% 91%;
+  --card:                 222 40% 10%;
+  --card-foreground:      213 31% 91%;
+  --popover:              222 40% 10%;
+  --popover-foreground:   213 31% 91%;
+  --primary:              142 76% 36%;
+  --primary-foreground:   144 85% 97%;
+  --secondary:            217 19% 27%;
+  --secondary-foreground: 213 31% 91%;
+  --muted:                223 47% 14%;
+  --muted-foreground:     215 16% 47%;
+  --accent:               217 19% 20%;
+  --accent-foreground:    213 31% 91%;
+  --destructive:          0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border:               217 19% 20%;
+  --input:                217 19% 20%;
+  --ring:                 142 76% 36%;
+
+  /* VPN theme — dark */
+  --vpn-bg:     #0f1117;
+  --vpn-card:   #1a1d27;
+  --vpn-border: #2a2d3a;
+
+  /* Text helpers for dark */
+  --text-primary:   #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted:     #64748b;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    background-color: var(--vpn-bg);
+    color: hsl(var(--foreground));
+    font-family: Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Thin scrollbar — both modes */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--vpn-border) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar       { width: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--vpn-border);
+    border-radius: 2px;
+  }
+}
+
+@layer utilities {
+  /* Protocol colors — static */
+  .text-vpn-green  { color: #22c55e; }
+  .text-vpn-blue   { color: #3b82f6; }
+  .text-vpn-orange { color: #f97316; }
+  .text-vpn-purple { color: #a855f7; }
+  .bg-vpn-green    { background-color: #22c55e; }
+
+  /* Theme-aware text helpers */
+  .text-primary-theme   { color: var(--text-primary); }
+  .text-secondary-theme { color: var(--text-secondary); }
+  .text-muted-theme     { color: var(--text-muted); }
+}
