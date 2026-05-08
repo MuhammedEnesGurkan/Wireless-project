@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
 # =============================================================================
-# check_setup.sh — VPN Benchmark setup verification for VM1 / VM2
+# check_setup.sh — VPN Benchmark setup verification for VM1 / VM2 / VM3
 # =============================================================================
 # Usage:
 #   sudo bash check_setup.sh --vm1
 #   sudo bash check_setup.sh --vm2
+#   sudo bash check_setup.sh --vm3
 #
 # Optional overrides:
-#   VM1_IP=192.168.80.141 VM2_IP=192.168.80.145 IFACE=ens33 sudo bash check_setup.sh --vm2
+#   VM1_IP=100.70.73.68 VM2_IP=100.101.234.82 IFACE=tailscale0 sudo bash check_setup.sh --vm2
 # =============================================================================
 
 set -euo pipefail
 
-VM1_IP="${VM1_IP:-192.168.80.141}"
-VM2_IP="${VM2_IP:-192.168.80.145}"
-IFACE="${IFACE:-ens33}"
+VM1_IP="${VM1_IP:-100.70.73.68}"
+VM2_IP="${VM2_IP:-100.101.234.82}"
+IFACE="${IFACE:-tailscale0}"
 
 ROLE="${1:-}"
-if [[ "${ROLE}" != "--vm1" && "${ROLE}" != "--vm2" ]]; then
-  echo "Usage: sudo bash $0 --vm1|--vm2"
+if [[ "${ROLE}" != "--vm1" && "${ROLE}" != "--vm2" && "${ROLE}" != "--vm3" ]]; then
+  echo "Usage: sudo bash $0 --vm1|--vm2|--vm3"
   exit 1
 fi
 
@@ -139,10 +140,32 @@ check_vm2() {
   fi
 }
 
+check_vm3() {
+  echo "== Checking VM3 setup =="
+  check_cmd iperf3 "iperf3 installed"
+  check_cmd hping3 "hping3 installed"
+  check_cmd tc "tc installed"
+  check_cmd ping "ping installed"
+  check_cmd mtr "mtr installed"
+  check_cmd tcpdump "tcpdump installed"
+  check_cmd nc "netcat installed (nc)"
+  check_cmd jq "jq installed"
+  check_cmd curl "curl installed"
+  check_file /etc/sudoers.d/vpn-bench "sudoers drop-in exists"
+  check_sudoers
+  if tc qdisc show dev "${IFACE}" >/dev/null 2>&1; then
+    pass "tc qdisc accessible on ${IFACE}"
+  else
+    fail "tc qdisc not accessible on ${IFACE}"
+  fi
+}
+
 if [[ "${ROLE}" == "--vm1" ]]; then
   check_vm1
-else
+elif [[ "${ROLE}" == "--vm2" ]]; then
   check_vm2
+else
+  check_vm3
 fi
 
 echo

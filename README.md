@@ -200,7 +200,7 @@ Connect to `ws://localhost:8000/ws/test` to receive:
 | `throughput`    | `protocol`, `timestamp`, `upload_mbps`, `download_mbps`         |
 | `cpu`           | `host`, `timestamp`, `usage_percent`                            |
 | `progress`      | `percent`, `label`                                              |
-| `result_final`  | `protocol`, `condition`, `avg_*`, `score`, `recommended`        |
+| `result_final`  | `protocol`, `condition`, `avg_*`, `score`, `dpi_resistance_score`, `recommended` |
 | `error`         | `phase`, `message`, `retry`                                     |
 | `heartbeat`     | *(keep-alive, sent every 15 s)*                                 |
 
@@ -231,6 +231,18 @@ score = normalize(
 ```
 
 The protocol with the highest score in each test run is marked **recommended**.
+
+### DPI Resistance Score (New)
+
+`dpi_resistance_score` is a heuristic 0-100 metric intended to estimate how resilient
+the active VPN tunnel is against DPI pressure under the selected network condition.
+
+It combines:
+- protocol baseline fingerprint resistance (e.g. OpenVPN TCP > OpenVPN UDP > WireGuard),
+- observed throughput retention vs expected condition rate,
+- measured packet-loss tolerance from ping sample completeness,
+- latency stability (RTT standard deviation),
+- extra weighting under harsher presets such as `stress_dos`.
 
 ---
 

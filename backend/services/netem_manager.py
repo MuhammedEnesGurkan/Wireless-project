@@ -1,5 +1,6 @@
 """
-Applies and removes tc netem network conditions on VM2.
+Applies and removes tc netem network conditions on the selected client VM
+(VM2 by default; optionally VM3).
 All parameters come from config.yaml — no hardcoded values.
 """
 
@@ -15,18 +16,27 @@ logger = get_logger(__name__)
 
 
 class NetemManager:
-    def __init__(self, ssh: SshManager) -> None:
+    def __init__(self, ssh: SshManager, *, client_vm: str = "vm2") -> None:
         self._ssh = ssh
         self._cfg = get_config()
         self._detected_iface: str | None = None
+        self._client_vm = client_vm
+
+    async def _run_client(self, command: str, *, check: bool = True):
+        if self._client_vm == "vm3":
+            return await self._ssh.run_vm3(command, check=check)
+        return await self._ssh.run_vm2(command, check=check)
 
     async def _get_iface(self) -> str:
-        """Return VM2 network interface, auto-detecting via `ip route` if config says eth0."""
+        """Return client VM network interface, auto-detecting via `ip route`."""
         if self._detected_iface:
             return self._detected_iface
-        configured = self._cfg.infrastructure.vm2.network_interface
+        if self._client_vm == "vm3" and self._cfg.infrastructure.vm3 is not None:
+            configured = self._cfg.infrastructure.vm3.network_interface
+        else:
+            configured = self._cfg.infrastructure.vm2.network_interface
         try:
-            result = await self._ssh.run_vm2(
+            result = await self._run_client(
                 "ip route show default | awk '/default/ {print $5; exit}'",
                 check=False,
             )
@@ -75,7 +85,7 @@ class NetemManager:
         cmd = self._build_netem_cmd(iface, preset)
 
         logger.info("netem_apply", condition=condition_key, cmd=cmd)
-        await self._ssh.run_vm2(cmd)
+        await self._run_client(cmd)
 
         if preset.hping3_flood and preset.hping3_target and preset.hping3_duration_sec:
             await self._start_hping3(preset)
@@ -88,7 +98,7 @@ class NetemManager:
             f"{target} &> /tmp/hping3.log & disown"
         )
         logger.info("hping3_start", target=target, duration=duration)
-        await self._ssh.run_vm2(cmd)
+        await self._run_client(cmd)
 
         # Schedule automatic stop after duration
         asyncio.get_event_loop().call_later(
@@ -97,11 +107,11 @@ class NetemManager:
 
     async def _stop_hping3(self) -> None:
         logger.info("hping3_stop")
-        await self._ssh.run_vm2("sudo killall hping3 2>/dev/null || true", check=False)
+        await self._run_client("sudo killall hping3 2>/dev/null || true", check=False)
 
     async def reset(self) -> None:
         iface = await self._get_iface()
         cmd = f"sudo tc qdisc del dev {iface} root 2>/dev/null || true"
         logger.info("netem_reset", iface=iface)
-        await self._ssh.run_vm2(cmd, check=False)
+        await self._run_client(cmd, check=False)
         await self._stop_hping3()

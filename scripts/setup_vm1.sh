@@ -20,9 +20,9 @@
 set -euo pipefail
 
 # ── Configurable via environment variables ────────────────────────────────────
-VM1_IP="${VM1_IP:-192.168.80.141}"
-VM2_IP="${VM2_IP:-192.168.80.145}"
-IFACE="${IFACE:-ens33}"
+VM1_IP="${VM1_IP:-100.70.73.68}"
+VM2_IP="${VM2_IP:-100.101.234.82}"
+IFACE="${IFACE:-tailscale0}"
 
 WG_SERVER_IP="${WG_SERVER_IP:-10.200.0.1/24}"
 WG_CLIENT_IP="${WG_CLIENT_IP:-10.200.0.2/32}"

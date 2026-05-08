@@ -43,12 +43,17 @@ class TestPhase(str, Enum):
     COMPLETE            = "complete"
     ERROR               = "error"
 
+class ClientVm(str, Enum):
+    VM2 = "vm2"
+    VM3 = "vm3"
+
 
 # ── HTTP Request / Response ────────────────────────────────────────────────────
 
 class StartTestRequest(BaseModel):
     condition: NetworkCondition
     protocol: VpnProtocol
+    client_vm: ClientVm = ClientVm.VM2
 
     model_config = {"use_enum_values": True}
 
@@ -108,6 +113,7 @@ class WsResultFinal(BaseModel):
     avg_throughput_mbps: float
     avg_cpu_percent: float
     score: float
+    dpi_resistance_score: float
     recommended: bool
 
 
@@ -158,6 +164,7 @@ class ProtocolTestResult(BaseModel):
     avg_throughput_mbps: float = 0.0
     avg_cpu_percent: float = 0.0
     score: float = 0.0
+    dpi_resistance_score: float = 0.0
     recommended: bool = False
 
     @model_validator(mode="after")

@@ -25,6 +25,7 @@ class RuntimeVmConfig:
 class RuntimeInfraConfig:
     vm1: RuntimeVmConfig = field(default_factory=RuntimeVmConfig)
     vm2: RuntimeVmConfig = field(default_factory=RuntimeVmConfig)
+    vm3: RuntimeVmConfig = field(default_factory=RuntimeVmConfig)
     configured: bool = False         # True once user has saved settings from UI
 
 
@@ -49,6 +50,12 @@ def update_runtime_config(
     vm2_ssh_key_path: Optional[str] = None,
     vm2_ssh_password: Optional[str] = None,
     vm2_use_password_auth: Optional[bool] = None,
+    vm3_host: Optional[str] = None,
+    vm3_port: Optional[int] = None,
+    vm3_user: Optional[str] = None,
+    vm3_ssh_key_path: Optional[str] = None,
+    vm3_ssh_password: Optional[str] = None,
+    vm3_use_password_auth: Optional[bool] = None,
 ) -> RuntimeInfraConfig:
     global _runtime
 
@@ -65,6 +72,13 @@ def update_runtime_config(
     if vm2_ssh_key_path is not None:      _runtime.vm2.ssh_key_path = vm2_ssh_key_path
     if vm2_ssh_password is not None:      _runtime.vm2.ssh_password = vm2_ssh_password
     if vm2_use_password_auth is not None: _runtime.vm2.use_password_auth = vm2_use_password_auth
+
+    if vm3_host is not None:              _runtime.vm3.host = vm3_host
+    if vm3_port is not None:              _runtime.vm3.port = vm3_port
+    if vm3_user is not None:              _runtime.vm3.user = vm3_user
+    if vm3_ssh_key_path is not None:      _runtime.vm3.ssh_key_path = vm3_ssh_key_path
+    if vm3_ssh_password is not None:      _runtime.vm3.ssh_password = vm3_ssh_password
+    if vm3_use_password_auth is not None: _runtime.vm3.use_password_auth = vm3_use_password_auth
 
     _runtime.configured = bool(
         _runtime.vm1.host and _runtime.vm2.host and

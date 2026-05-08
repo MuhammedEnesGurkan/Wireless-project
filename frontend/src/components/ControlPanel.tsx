@@ -20,7 +20,7 @@ import {
   CONDITION_OPTIONS,
   conditionBadgeText,
 } from "@/lib/utils";
-import type { VpnProtocol, NetworkCondition } from "@/types";
+import type { ClientVm, VpnProtocol, NetworkCondition } from "@/types";
 
 export function ControlPanel() {
   const running = useStore((s) => s.running);
@@ -29,9 +29,11 @@ export function ControlPanel() {
   const progressLabel = useStore((s) => s.progressLabel);
   const selectedProtocol = useStore((s) => s.selectedProtocol);
   const selectedCondition = useStore((s) => s.selectedCondition);
+  const selectedClientVm = useStore((s) => s.selectedClientVm);
   const presets = useStore((s) => s.presets);
   const setSelectedProtocol = useStore((s) => s.setSelectedProtocol);
   const setSelectedCondition = useStore((s) => s.setSelectedCondition);
+  const setSelectedClientVm = useStore((s) => s.setSelectedClientVm);
   const setRunning = useStore((s) => s.setRunning);
   const beginRun = useStore((s) => s.beginRun);
   const clearMetrics = useStore((s) => s.clearMetrics);
@@ -56,6 +58,7 @@ export function ControlPanel() {
       await api.startTest({
         condition: selectedCondition,
         protocol: selectedProtocol,
+        client_vm: selectedClientVm,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -65,6 +68,7 @@ export function ControlPanel() {
   }, [
     selectedProtocol,
     selectedCondition,
+    selectedClientVm,
     clearMetrics,
     clearResults,
     clearLog,
@@ -150,6 +154,31 @@ export function ControlPanel() {
         </Select>
         <p className="text-[10px] text-muted-foreground">
           {PROTOCOL_META[selectedProtocol]?.description}
+        </p>
+      </div>
+
+      <Separator />
+
+      {/* Client/Test VM */}
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Test Node (Client)
+        </label>
+        <Select
+          value={selectedClientVm}
+          onValueChange={(v) => setSelectedClientVm(v as ClientVm)}
+          disabled={running}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="vm2">VM2 — Client / Test Engine</SelectItem>
+            <SelectItem value="vm3">VM3 — Client / Test Engine</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground">
+          VM3 seçersen, VM3 üzerinde WireGuard/OpenVPN/IPSec client + iperf3 + tc kurulu olmalı.
         </p>
       </div>
 

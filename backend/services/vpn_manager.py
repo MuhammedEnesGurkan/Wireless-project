@@ -20,9 +20,15 @@ class TunnelVerificationError(RuntimeError):
 
 
 class VpnManager:
-    def __init__(self, ssh: SshManager) -> None:
+    def __init__(self, ssh: SshManager, *, client_vm: str = "vm2") -> None:
         self._ssh = ssh
         self._cfg = get_config()
+        self._client_vm = client_vm
+
+    async def _run_client(self, command: str, *, check: bool = True):
+        if self._client_vm == "vm3":
+            return await self._ssh.run_vm3(command, check=check)
+        return await self._ssh.run_vm2(command, check=check)
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -35,11 +41,11 @@ class VpnManager:
     async def start_client(self, protocol: VpnProtocol) -> None:
         logger.info("vpn_client_start", protocol=protocol)
         cmd = self._get_client_connect_cmd(protocol)
-        await self._ssh.run_vm2(cmd)
+        await self._run_client(cmd)
         await asyncio.sleep(3)
 
     async def verify_tunnel(self, protocol: VpnProtocol) -> None:
-        """Ping VM1's VPN IP from VM2.  Retries up to verify_max_attempts."""
+        """Ping VM1's VPN IP from the selected client VM. Retries up to verify_max_attempts."""
         vpn_ip = self._get_server_vpn_ip(protocol)
         cfg = self._cfg.tests.latency
         attempts = cfg.verify_max_attempts
@@ -52,7 +58,7 @@ class VpnManager:
                 vpn_ip=vpn_ip,
                 protocol=protocol,
             )
-            result = await self._ssh.run_vm2(
+            result = await self._run_client(
                 f"ping -c {count} -W 3 {vpn_ip}",
                 check=False,
             )
@@ -70,7 +76,7 @@ class VpnManager:
     async def stop_client(self, protocol: VpnProtocol) -> None:
         logger.info("vpn_client_stop", protocol=protocol)
         cmd = self._get_client_disconnect_cmd(protocol)
-        await self._ssh.run_vm2(cmd, check=False)
+        await self._run_client(cmd, check=False)
         await asyncio.sleep(1)
 
     async def stop_server(self, protocol: VpnProtocol) -> None:
@@ -110,16 +116,17 @@ class VpnManager:
         match protocol:
             case VpnProtocol.WIREGUARD:
                 iface = self._cfg.vpn.wireguard.client_interface
-                return f"sudo wg-quick up {iface}"
+                # Bring down first in case it's already up from a previous unclean run
+                return f"sudo wg-quick down {iface} 2>/dev/null || true; sudo wg-quick up {iface}"
             case VpnProtocol.OPENVPN_UDP:
                 conf = self._cfg.vpn.openvpn_udp.client_config
                 return (
-                    f"sudo openvpn --config {conf} --daemon --log /tmp/ovpn-udp.log"
+                    f"sudo /usr/sbin/openvpn --config {conf} --daemon --log /tmp/ovpn-udp.log"
                 )
             case VpnProtocol.OPENVPN_TCP:
                 conf = self._cfg.vpn.openvpn_tcp.client_config
                 return (
-                    f"sudo openvpn --config {conf} --daemon --log /tmp/ovpn-tcp.log"
+                    f"sudo /usr/sbin/openvpn --config {conf} --daemon --log /tmp/ovpn-tcp.log"
                 )
             case VpnProtocol.IPSEC:
                 conn = self._cfg.vpn.ipsec.connection_name

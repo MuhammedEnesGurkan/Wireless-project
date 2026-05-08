@@ -192,6 +192,7 @@ const DEFAULT_VM: VmSettings = {
 export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [vm1, setVm1] = useState<VmSettings>({ ...DEFAULT_VM });
   const [vm2, setVm2] = useState<VmSettings>({ ...DEFAULT_VM });
+  const [vm3, setVm3] = useState<VmSettings>({ ...DEFAULT_VM });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [results, setResults] = useState<ConnectivityResult[]>([]);
@@ -218,6 +219,16 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         ssh_password: "",
         use_password_auth: cfg.vm2.use_password_auth,
       });
+      if (cfg.vm3) {
+        setVm3({
+          host: cfg.vm3.host,
+          port: cfg.vm3.port,
+          user: cfg.vm3.user,
+          ssh_key_path: cfg.vm3.ssh_key_path,
+          ssh_password: "",
+          use_password_auth: cfg.vm3.use_password_auth,
+        });
+      }
       setResults([]);
       setSaveError(null);
       setSaved(false);
@@ -229,7 +240,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     setSaveError(null);
     setSaved(false);
     try {
-      await api.saveConfig({ vm1, vm2 });
+      await api.saveConfig({ vm1, vm2, vm3 });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
@@ -237,14 +248,14 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     } finally {
       setSaving(false);
     }
-  }, [vm1, vm2]);
+  }, [vm1, vm2, vm3]);
 
   const handleTestConnectivity = useCallback(async () => {
     // Save first, then test
     setSaving(true);
     setSaveError(null);
     try {
-      await api.saveConfig({ vm1, vm2 });
+      await api.saveConfig({ vm1, vm2, vm3 });
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
       setSaving(false);
@@ -262,11 +273,13 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     } finally {
       setTesting(false);
     }
-  }, [vm1, vm2]);
+  }, [vm1, vm2, vm3]);
 
   const vm1Result = results.find((r) => r.vm === "vm1");
   const vm2Result = results.find((r) => r.vm === "vm2");
-  const allOk = results.length === 2 && results.every((r) => r.success);
+  const vm3Result = results.find((r) => r.vm === "vm3");
+  const expectedCount = vm3.host ? 3 : 2;
+  const allOk = results.length === expectedCount && results.every((r) => r.success);
 
   return (
     <AnimatePresence>
@@ -325,6 +338,15 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 vm={vm2}
                 result={vm2Result}
                 onChange={setVm2}
+                disabled={saving || testing}
+              />
+
+              <VmBlock
+                label="VM3 — Extra Client / Test Engine (Optional)"
+                color="#a855f7"
+                vm={vm3}
+                result={vm3Result}
+                onChange={setVm3}
                 disabled={saving || testing}
               />
 

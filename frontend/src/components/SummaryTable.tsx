@@ -44,6 +44,7 @@ export function SummaryTable() {
                 <TableHead>Throughput</TableHead>
                 <TableHead>CPU %</TableHead>
                 <TableHead>Score</TableHead>
+                <TableHead>DPI Resistance</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -75,6 +76,11 @@ export function SummaryTable() {
                     <TableCell>
                       <span className={`font-mono font-semibold ${scoreColor(row.score)}`}>
                         {row.score.toFixed(1)}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className={`font-mono font-semibold ${scoreColor(row.dpi_resistance_score)}`}>
+                        {row.dpi_resistance_score.toFixed(1)}
                       </span>
                     </TableCell>
                     <TableCell>

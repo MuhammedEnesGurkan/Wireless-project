@@ -29,6 +29,7 @@ class VmConfig(BaseModel):
 class InfrastructureConfig(BaseModel):
     vm1: VmConfig
     vm2: VmConfig
+    vm3: VmConfig | None = None
 
 
 class SshConfig(BaseModel):
@@ -157,12 +158,18 @@ class AppConfig(BaseModel):
         if host := os.getenv("VM2_HOST"):
             env_overrides.setdefault("infrastructure", {})
             env_overrides["infrastructure"].setdefault("vm2", {})["host"] = host
+        if host := os.getenv("VM3_HOST"):
+            env_overrides.setdefault("infrastructure", {})
+            env_overrides["infrastructure"].setdefault("vm3", {})["host"] = host
         if key := os.getenv("VM1_SSH_KEY_PATH"):
             env_overrides.setdefault("infrastructure", {})
             env_overrides["infrastructure"].setdefault("vm1", {})["ssh_key_path"] = key
         if key := os.getenv("VM2_SSH_KEY_PATH"):
             env_overrides.setdefault("infrastructure", {})
             env_overrides["infrastructure"].setdefault("vm2", {})["ssh_key_path"] = key
+        if key := os.getenv("VM3_SSH_KEY_PATH"):
+            env_overrides.setdefault("infrastructure", {})
+            env_overrides["infrastructure"].setdefault("vm3", {})["ssh_key_path"] = key
         if log_level := os.getenv("LOG_LEVEL"):
             env_overrides.setdefault("backend", {})["log_level"] = log_level
         if port := os.getenv("BACKEND_PORT"):

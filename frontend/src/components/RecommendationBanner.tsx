@@ -43,6 +43,7 @@ export function RecommendationBanner() {
                 {fmtMs(recommendation.avg_latency_ms)} avg latency ·{" "}
                 {fmtMbps(recommendation.avg_throughput_mbps)} ·{" "}
                 CPU {fmtPercent(recommendation.avg_cpu_percent)} ·{" "}
+                DPI {recommendation.dpi_resistance_score.toFixed(1)} ·{" "}
                 Score{" "}
                 <span className="text-vpn-green font-semibold">
                   {recommendation.score.toFixed(1)}

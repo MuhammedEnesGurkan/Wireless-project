@@ -30,16 +30,25 @@ logger = get_logger(__name__)
 # Type alias for the streaming callback
 StreamCallback = Callable[[dict], Awaitable[None]]
 
-_PING_RE = re.compile(
-    r"icmp_seq=\d+ ttl=\d+ time=(?P<ms>[\d.]+) ms"
-)
+_PING_RE = re.compile(r"time=(?P<ms>[\d.]+)\s*ms")
 _PING_LOSS_RE = re.compile(r"(?P<loss>[\d.]+)% packet loss")
 
 
 class MetricsCollector:
-    def __init__(self, ssh: SshManager) -> None:
+    def __init__(self, ssh: SshManager, *, client_vm: str = "vm2") -> None:
         self._ssh = ssh
         self._cfg = get_config()
+        self._client_vm = client_vm
+
+    def _pool_client(self):
+        if self._client_vm == "vm3":
+            return self._ssh.pool_vm3()
+        return self._ssh.pool_vm2()
+
+    async def _run_client(self, command: str, *, check: bool = True):
+        if self._client_vm == "vm3":
+            return await self._ssh.run_vm3(command, check=check)
+        return await self._ssh.run_vm2(command, check=check)
 
     # ── Latency ───────────────────────────────────────────────────────────────
 
@@ -58,7 +67,7 @@ class MetricsCollector:
 
         logger.info("latency_start", protocol=protocol, target=target_ip, count=count)
 
-        pool = self._ssh.pool_vm2()
+        pool = self._pool_client()
         async for line in pool.stream_run(cmd):
             m = _PING_RE.search(line)
             if m:
@@ -155,13 +164,25 @@ class MetricsCollector:
             f"iperf3 -c {server_ip} -p {port} -t {duration} "
             f"-P {parallel} -J {rev_flag}"
         )
-        result = await self._ssh.run_vm2(cmd)
-        data = json.loads(result.stdout)
+        result = await self._run_client(cmd)
+        
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            from backend.services.ssh_manager import SshCommandError
+            raise SshCommandError(cmd, result.exit_status, result.stdout or "Invalid JSON and no stderr")
+            
+        if "error" in data:
+            from backend.services.ssh_manager import SshCommandError
+            raise SshCommandError(cmd, result.exit_status, data["error"])
 
         try:
             bits_per_sec = data["end"]["sum_received"]["bits_per_second"]
         except KeyError:
-            bits_per_sec = data["end"]["sum_sent"]["bits_per_second"]
+            try:
+                bits_per_sec = data["end"]["sum_sent"]["bits_per_second"]
+            except KeyError:
+                bits_per_sec = 0.0
 
         mbps = bits_per_sec / 1_000_000
         logger.debug("iperf3_result", direction=direction, mbps=mbps)

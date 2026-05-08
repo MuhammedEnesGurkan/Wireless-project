@@ -6,10 +6,10 @@
 #
 # Examples:
 #   bash scripts/deploy_remote_setup.sh \
-#     --role vm1 --host 192.168.80.141 --user wazuh --vm1-ip 192.168.80.141 --vm2-ip 192.168.80.145
+#     --role vm1 --host 100.70.73.68 --user wazuh --vm1-ip 100.70.73.68 --vm2-ip 100.101.234.82
 #
 #   bash scripts/deploy_remote_setup.sh \
-#     --role vm2 --host 192.168.80.145 --user sshka --vm1-ip 192.168.80.141 --vm2-ip 192.168.80.145 --iface ens33
+#     --role vm2 --host 100.101.234.82 --user sshka --vm1-ip 100.70.73.68 --vm2-ip 100.101.234.82 --iface tailscale0
 #
 # Optional:
 #   --key ~/.ssh/id_ed25519
@@ -23,9 +23,9 @@ HOST=""
 USER_NAME=""
 PORT="22"
 KEY=""
-IFACE="ens33"
-VM1_IP="192.168.80.141"
-VM2_IP="192.168.80.145"
+IFACE="tailscale0"
+VM1_IP="100.70.73.68"
+VM2_IP="100.101.234.82"
 
 info()  { echo -e "\033[0;32m[INFO]\033[0m  $*"; }
 warn()  { echo -e "\033[0;33m[WARN]\033[0m  $*"; }
@@ -44,9 +44,9 @@ Required:
 Optional:
   --port      SSH port (default: 22)
   --key       SSH private key path (default: use SSH agent/default keys)
-  --iface     Network interface passed to setup script (default: ens33)
-  --vm1-ip    VM1 IP passed to setup script (default: 192.168.80.141)
-  --vm2-ip    VM2 IP passed to setup script (default: 192.168.80.145)
+  --iface     Network interface passed to setup script (default: tailscale0)
+  --vm1-ip    VM1 IP passed to setup script (default: 100.70.73.68)
+  --vm2-ip    VM2 IP passed to setup script (default: 100.101.234.82)
   -h, --help  Show this help
 EOF
 }
@@ -99,6 +99,10 @@ REMOTE_CHECK="~/$(basename "${CHECK_SCRIPT}")"
 info "Uploading scripts to ${REMOTE}..."
 scp "${SCP_OPTS[@]}" "${SETUP_SCRIPT}" "${REMOTE}:${REMOTE_SETUP}"
 scp "${SCP_OPTS[@]}" "${CHECK_SCRIPT}" "${REMOTE}:${REMOTE_CHECK}"
+
+info "Normalizing script line endings on remote host..."
+ssh "${SSH_OPTS[@]}" "${REMOTE}" \
+  "sed -i 's/\r$//' ${REMOTE_SETUP} ${REMOTE_CHECK}"
 
 info "Running ${ROLE} setup on ${HOST}..."
 ssh "${SSH_OPTS[@]}" "${REMOTE}" \

@@ -9,6 +9,7 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import type {
+  ClientVm,
   TestPhase,
   VpnProtocol,
   NetworkCondition,
@@ -33,12 +34,14 @@ interface TestSlice {
   nextRunId: number;
   selectedProtocol: VpnProtocol;
   selectedCondition: NetworkCondition;
+  selectedClientVm: ClientVm;
   wsConnected: boolean;
   setRunning: (v: boolean) => void;
   setPhase: (phase: TestPhase) => void;
   setProgress: (percent: number, label: string) => void;
   setSelectedProtocol: (p: VpnProtocol) => void;
   setSelectedCondition: (c: NetworkCondition) => void;
+  setSelectedClientVm: (vm: ClientVm) => void;
   setWsConnected: (v: boolean) => void;
   beginRun: () => void;
 }
@@ -102,6 +105,7 @@ export const useStore = create<Store>()(
     nextRunId: 1,
     selectedProtocol: "wireguard",
     selectedCondition: "home_network",
+    selectedClientVm: "vm2",
     wsConnected: false,
 
     setRunning: (v) => set({ running: v }),
@@ -109,6 +113,7 @@ export const useStore = create<Store>()(
     setProgress: (percent, label) => set({ progress: percent, progressLabel: label }),
     setSelectedProtocol: (selectedProtocol) => set({ selectedProtocol }),
     setSelectedCondition: (selectedCondition) => set({ selectedCondition }),
+    setSelectedClientVm: (selectedClientVm) => set({ selectedClientVm }),
     setWsConnected: (wsConnected) => set({ wsConnected }),
     beginRun: () =>
       set((state) => ({
@@ -190,6 +195,7 @@ export const useStore = create<Store>()(
             avg_throughput_mbps: result.avg_throughput_mbps,
             avg_cpu_percent: result.avg_cpu_percent,
             score: result.score,
+            dpi_resistance_score: result.dpi_resistance_score,
             recommended: result.recommended,
           },
         ];
@@ -241,6 +247,7 @@ export const selectTestState = (s: Store) => ({
   progressLabel: s.progressLabel,
   selectedProtocol: s.selectedProtocol,
   selectedCondition: s.selectedCondition,
+  selectedClientVm: s.selectedClientVm,
   wsConnected: s.wsConnected,
 });
 

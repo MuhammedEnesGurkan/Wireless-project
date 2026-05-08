@@ -56,6 +56,36 @@ def _dbg(msg: str, hypothesis_id: str, data: dict, run_id: str = "pre-fix") -> N
     # endregion
 
 
+def _get_vm_sudo_password(vm_name: str) -> str:
+    """
+    Returns the sudo password for the given VM if password auth is enabled,
+    otherwise returns an empty string.
+    """
+    from backend.services.runtime_config import get_runtime_config
+    rt = get_runtime_config()
+    rt_vm = getattr(rt, vm_name, None)
+    if rt_vm and rt_vm.use_password_auth and rt_vm.ssh_password:
+        return rt_vm.ssh_password
+    return ""
+
+
+def _inject_sudo_password(command: str, password: str) -> str:
+    """
+    Rewrites a command that uses `sudo` to feed the password via `sudo -S`.
+    Handles commands where sudo is at the start or anywhere in a pipeline.
+    Single-quotes in the password are escaped for safe shell embedding.
+    """
+    if not password or "sudo" not in command:
+        return command
+    # Escape single quotes in password for safe embedding in shell
+    esc_pass = password.replace("'", "'\\''")
+    # Rewrite every `sudo ` occurrence to `sudo -S -p '' ` and prepend the
+    # password on a dedicated line so the first sudo reads it from stdin.
+    # We use a here-string via `bash -c` to keep it shell-agnostic.
+    rewritten = command.replace("sudo ", "sudo -S -p '' ", 1)
+    return f"echo '{esc_pass}' | {rewritten}"
+
+
 def _resolve_vm_params(vm_name: str, cfg: AppConfig) -> dict:
     """
     Merge runtime config overrides on top of config.yaml values.
@@ -190,16 +220,19 @@ class VmSshPool:
 
     async def run(self, command: str, *, check: bool = True) -> SSHCompletedProcess:
         conn = await self.acquire()
+        # Auto-inject sudo password when password auth is enabled
+        sudo_pass = _get_vm_sudo_password(self._vm_name)
+        actual_command = _inject_sudo_password(command, sudo_pass)
         # region agent log
         _dbg(
             "run_command",
             "H-E",
-            {"vm": self._vm_name, "command": command[:240], "check": check},
+            {"vm": self._vm_name, "command": actual_command[:240], "check": check},
         )
         # endregion
         try:
             result = await asyncio.wait_for(
-                conn.run(command, check=False),
+                conn.run(actual_command, check=False),
                 timeout=self._cmd_timeout,
             )
         except asyncssh.DisconnectError:
@@ -305,6 +338,9 @@ class SshManager:
     def pool_vm2(self) -> VmSshPool:
         return self._pool("vm2")
 
+    def pool_vm3(self) -> VmSshPool:
+        return self._pool("vm3")
+
     def _pool(self, vm_name: str) -> VmSshPool:
         if vm_name not in self._pools:
             self._pools[vm_name] = VmSshPool(vm_name, self._cfg)
@@ -316,11 +352,17 @@ class SshManager:
     async def run_vm2(self, command: str, *, check: bool = True) -> SSHCompletedProcess:
         return await self._pool("vm2").run(command, check=check)
 
+    async def run_vm3(self, command: str, *, check: bool = True) -> SSHCompletedProcess:
+        return await self._pool("vm3").run(command, check=check)
+
     async def stream_vm1(self, command: str) -> AsyncIterator[str]:
         return self._pool("vm1").stream_run(command)
 
     async def stream_vm2(self, command: str) -> AsyncIterator[str]:
         return self._pool("vm2").stream_run(command)
+
+    async def stream_vm3(self, command: str) -> AsyncIterator[str]:
+        return self._pool("vm3").stream_run(command)
 
     async def shutdown(self) -> None:
         for pool in self._pools.values():

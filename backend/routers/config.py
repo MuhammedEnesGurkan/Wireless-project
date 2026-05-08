@@ -37,6 +37,7 @@ class VmSettingsPayload(BaseModel):
 class InfrastructureSettingsPayload(BaseModel):
     vm1: VmSettingsPayload
     vm2: VmSettingsPayload
+    vm3: VmSettingsPayload | None = None
 
 
 class VmSettingsResponse(BaseModel):
@@ -51,6 +52,7 @@ class VmSettingsResponse(BaseModel):
 class InfrastructureSettingsResponse(BaseModel):
     vm1: VmSettingsResponse
     vm2: VmSettingsResponse
+    vm3: VmSettingsResponse | None = None
     configured: bool
 
 
@@ -82,6 +84,7 @@ async def get_infrastructure_config() -> InfrastructureSettingsResponse:
     return InfrastructureSettingsResponse(
         vm1=_vm_resp(rt.vm1, cfg.infrastructure.vm1),
         vm2=_vm_resp(rt.vm2, cfg.infrastructure.vm2),
+        vm3=_vm_resp(rt.vm3, cfg.infrastructure.vm3) if cfg.infrastructure.vm3 is not None else None,
         configured=rt.configured,
     )
 
@@ -104,6 +107,12 @@ async def save_infrastructure_config(
         vm2_ssh_key_path=payload.vm2.ssh_key_path or "",
         vm2_ssh_password=payload.vm2.ssh_password or "",
         vm2_use_password_auth=payload.vm2.use_password_auth,
+        vm3_host=(payload.vm3.host if payload.vm3 else None),
+        vm3_port=(payload.vm3.port if payload.vm3 else None),
+        vm3_user=(payload.vm3.user if payload.vm3 else None),
+        vm3_ssh_key_path=(payload.vm3.ssh_key_path or "" if payload.vm3 else None),
+        vm3_ssh_password=(payload.vm3.ssh_password or "" if payload.vm3 else None),
+        vm3_use_password_auth=(payload.vm3.use_password_auth if payload.vm3 else None),
     )
 
     # Reset SSH pool so next connection uses new settings
@@ -122,64 +131,116 @@ async def save_infrastructure_config(
 @router.post("/test-connectivity", response_model=list[ConnectivityResult])
 async def test_connectivity() -> list[ConnectivityResult]:
     """
-    Try to SSH into VM1 and VM2 and return connection results.
-    Used by the Settings panel to verify credentials before running a test.
+    Try to SSH into all VMs in parallel and return connection results.
+    All VMs are tested concurrently so total wait is max 12s, not 3x12s.
     """
-    ssh = get_ssh_manager()
-    results: list[ConnectivityResult] = []
+    import time
+    import socket as _socket
 
-    for vm_name in ("vm1", "vm2"):
-        import time
+    cfg = get_config()
+    ssh = get_ssh_manager()
+
+    vm_names = ["vm1", "vm2"]
+    if cfg.infrastructure.vm3 is not None:
+        vm_names.append("vm3")
+
+    # Reset SSH pools so we use the latest saved credentials
+    await ssh.shutdown()
+
+    async def _check_tcp(host: str, port: int, timeout: float = 3.0) -> str | None:
+        """Return None if TCP port is open, else a human-readable error string."""
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=timeout
+            )
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return None
+        except asyncio.TimeoutError:
+            return f"TCP port {port} zaman aşımı — VM kapalı veya port erişilemiyor"
+        except ConnectionRefusedError:
+            return f"TCP port {port} reddedildi — SSH servisi çalışmıyor (sudo systemctl start ssh)"
+        except OSError as exc:
+            raw = str(exc)
+            if "getaddrinfo" in raw or "11001" in raw:
+                return f"IP adresi çözümlenemedi ({host}) — IP doğru mu?"
+            return f"Ağ hatası: {raw}"
+
+    async def _test_vm(vm_name: str) -> ConnectivityResult:
+        from backend.services.runtime_config import get_runtime_config
+        from backend.core.config import get_config as _get_cfg
+
+        _cfg = _get_cfg()
+        rt = get_runtime_config()
+        rt_vm = getattr(rt, vm_name)
+        cfg_vm = getattr(_cfg.infrastructure, vm_name, None)
+
+        host = rt_vm.host or (cfg_vm.host if cfg_vm else "")
+        port = rt_vm.port or (cfg_vm.port if cfg_vm else 22)
+        user = rt_vm.user or (cfg_vm.user if cfg_vm else "")
+
+        # --- Step 1: quick TCP check ---
+        tcp_err = await _check_tcp(host, port, timeout=4.0)
+        if tcp_err:
+            return ConnectivityResult(
+                vm=vm_name, success=False,
+                message=f"[{vm_name.upper()} {host}:{port}] {tcp_err}",
+                latency_ms=None,
+            )
+
+        # --- Step 2: SSH auth check ---
         start = time.monotonic()
         try:
-            result = await asyncio.wait_for(
-                ssh.run_vm1("echo ok") if vm_name == "vm1" else ssh.run_vm2("echo ok"),
-                timeout=10,
+            run_fn = (
+                ssh.run_vm1 if vm_name == "vm1"
+                else ssh.run_vm2 if vm_name == "vm2"
+                else ssh.run_vm3
             )
+            result = await asyncio.wait_for(run_fn("echo ok"), timeout=10)
             elapsed = (time.monotonic() - start) * 1000
+
             if result.stdout.strip() == "ok":
-                results.append(ConnectivityResult(
+                return ConnectivityResult(
                     vm=vm_name, success=True,
-                    message="Connected successfully",
+                    message=f"Bağlandı ✓  ({user}@{host}:{port})",
                     latency_ms=round(elapsed, 1),
-                ))
-            else:
-                results.append(ConnectivityResult(
-                    vm=vm_name, success=False,
-                    message=f"Unexpected output: {result.stdout!r}",
-                    latency_ms=None,
-                ))
-        except asyncio.TimeoutError:
-            results.append(ConnectivityResult(
+                )
+            return ConnectivityResult(
                 vm=vm_name, success=False,
-                message="Bağlantı zaman aşımına uğradı (10 s) — VM açık mı ve SSH portu erişilebilir mi?",
+                message=f"Beklenmeyen çıktı: {result.stdout!r}",
                 latency_ms=None,
-            ))
+            )
+
+        except asyncio.TimeoutError:
+            return ConnectivityResult(
+                vm=vm_name, success=False,
+                message=f"SSH kimlik doğrulaması zaman aşımına uğradı — şifre/anahtar doğru mu?",
+                latency_ms=None,
+            )
         except FileNotFoundError as exc:
-            results.append(ConnectivityResult(
+            return ConnectivityResult(
                 vm=vm_name, success=False,
                 message=str(exc),
                 latency_ms=None,
-            ))
+            )
         except Exception as exc:  # noqa: BLE001
             raw = str(exc)
-            # Map common socket errors to human-readable messages
-            if "getaddrinfo failed" in raw or "11001" in raw:
-                msg = f"IP adresi çözümlenemedi: '{raw}' — Girilen IP/hostname doğru mu?"
-            elif "Connection refused" in raw or "10061" in raw:
-                msg = "Bağlantı reddedildi — SSH servisi çalışıyor mu? (sudo systemctl start ssh)"
-            elif "No route to host" in raw or "10065" in raw:
+            if "Authentication" in raw or "auth" in raw.lower() or "Permission denied" in raw:
+                msg = f"SSH kimlik doğrulaması başarısız — kullanıcı adı ({user}), şifre veya SSH key yanlış olabilir"
+            elif "No route" in raw or "10065" in raw:
                 msg = "Host'a ulaşılamıyor — VM açık mı ve aynı ağda mı?"
-            elif "Authentication" in raw or "auth" in raw.lower():
-                msg = "Kimlik doğrulama başarısız — SSH key veya şifre yanlış olabilir"
-            elif "Permission denied" in raw:
-                msg = "İzin reddedildi — SSH key doğru mu? Kullanıcı adı doğru mu?"
             else:
                 msg = raw
-            results.append(ConnectivityResult(
+            return ConnectivityResult(
                 vm=vm_name, success=False,
                 message=msg,
                 latency_ms=None,
-            ))
+            )
 
+    # Run all VM checks concurrently
+    tasks = [_test_vm(vm) for vm in vm_names]
+    results = list(await asyncio.gather(*tasks))
     return results

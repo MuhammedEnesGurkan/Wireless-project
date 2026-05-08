@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from backend.core.config import get_config
 from backend.core.logging import get_logger
 from backend.models.schemas import (
+    ClientVm,
     HealthResponse,
     NetworkCondition,
     ProtocolTestResult,
@@ -172,6 +173,80 @@ def compute_score(result: ProtocolTestResult) -> float:
     return score
 
 
+def compute_dpi_resistance_score(result: ProtocolTestResult) -> float:
+    """
+    Heuristic DPI resistance score (0-100).
+    Combines protocol fingerprint baseline with observed link resilience.
+    """
+    app_cfg = get_config()
+    condition = app_cfg.network_conditions.get(result.condition)
+    if condition is None:
+        logger.warning("dpi_score_condition_missing", condition=result.condition)
+        return 0.0
+
+    def _clamp(value: float, min_v: float, max_v: float) -> float:
+        return max(min_v, min(max_v, value))
+
+    def _clamp01(value: float) -> float:
+        return _clamp(value, 0.0, 1.0)
+
+    # Baseline reflects how easily each protocol is typically fingerprinted by DPI.
+    baseline_by_protocol = {
+        "wireguard": 46.0,
+        "openvpn_udp": 62.0,
+        "openvpn_tcp": 78.0,
+        "ipsec": 52.0,
+    }
+    baseline = baseline_by_protocol.get(result.protocol, 50.0)
+
+    throughput_target_mbps = float(condition.rate_mbit) if condition.rate_mbit > 0 else 100.0
+    throughput_ratio = _clamp01(result.avg_throughput_mbps / max(throughput_target_mbps, 1e-6))
+
+    expected_pings = max(app_cfg.tests.latency.ping_count, 1)
+    measured_loss_pct = max(
+        0.0, (expected_pings - len(result.latency_samples)) / expected_pings * 100.0
+    )
+    expected_loss_pct = float(condition.loss_percent)
+    loss_tolerance_pct = max(1.0, expected_loss_pct + 1.5)
+    loss_score = _clamp01(1.0 - (measured_loss_pct / loss_tolerance_pct))
+
+    latency_values = [sample.value_ms for sample in result.latency_samples]
+    latency_stddev = statistics.pstdev(latency_values) if len(latency_values) > 1 else 0.0
+    jitter_target_ms = max(5.0, float(condition.jitter_ms) if condition.jitter_ms > 0 else 10.0)
+    stability_score = _clamp01(1.0 - (latency_stddev / max(jitter_target_ms, 1e-6)))
+
+    # Harsher conditions carry more signal for resistance interpretation.
+    condition_severity = _clamp01(
+        (float(condition.loss_percent) / 10.0) * 0.45
+        + (float(condition.delay_ms) / 600.0) * 0.35
+        + (float(condition.jitter_ms) / 200.0) * 0.20
+    )
+    observed_resilience = (
+        throughput_ratio * 0.50 + loss_score * 0.30 + stability_score * 0.20
+    )
+    adaptive_shift = (observed_resilience - 0.5) * 30.0  # -15..+15
+    severity_bonus = condition_severity * 10.0
+
+    stress_bonus = 0.0
+    if result.condition == NetworkCondition.STRESS_DOS.value and observed_resilience >= 0.65:
+        stress_bonus = 8.0
+
+    score = round(_clamp(baseline + adaptive_shift + severity_bonus + stress_bonus, 0.0, 100.0), 1)
+    logger.info(
+        "dpi_score_breakdown",
+        protocol=result.protocol,
+        condition=result.condition,
+        dpi_resistance_score=score,
+        baseline=baseline,
+        throughput_ratio=round(throughput_ratio, 4),
+        loss_score=round(loss_score, 4),
+        stability_score=round(stability_score, 4),
+        observed_resilience=round(observed_resilience, 4),
+        condition_severity=round(condition_severity, 4),
+    )
+    return score
+
+
 # ── Core test runner ──────────────────────────────────────────────────────────
 
 PROTOCOL_ORDER = [
@@ -217,6 +292,18 @@ def _humanize_ssh_error(exc: SshCommandError) -> str:
             "VM içinde yetkili kullanıcıyla bu hesabı sudoers'a ekleyin."
         )
 
+    if "çözdünmü" in stderr:
+        return (
+            "SSH command failed: 'openvpn' komutu yolunda sahte bir script (çözdünmü) algılandı. "
+            "Backend mutlak yol kullanarak (/usr/sbin/openvpn) bu sorunu atlayacaktır. Lütfen testi tekrar başlatın."
+        )
+
+    if "command not found" in stderr and "openvpn" in cmd:
+        return (
+            "SSH command failed: OpenVPN yüklü değil veya bulunamadı. "
+            "VM üzerinde 'sudo apt install openvpn' çalıştırın."
+        )
+
     return f"SSH command failed: {exc}"
 
 
@@ -224,35 +311,59 @@ async def _run_single_protocol(
     protocol: VpnProtocol,
     condition_key: str,
     ssh_mgr,
+    client_vm: ClientVm,
 ) -> ProtocolTestResult:
     cfg = get_config()
-    vpn = VpnManager(ssh_mgr)
-    netem = NetemManager(ssh_mgr)
-    metrics = MetricsCollector(ssh_mgr)
+    vpn = VpnManager(ssh_mgr, client_vm=client_vm.value)
+    netem = NetemManager(ssh_mgr, client_vm=client_vm.value)
+    metrics = MetricsCollector(ssh_mgr, client_vm=client_vm.value)
 
     result = ProtocolTestResult(protocol=protocol.value, condition=condition_key)
+    server_service = vpn._get_server_service(protocol)
+    server_vpn_ip = vpn._get_server_vpn_ip(protocol)
+    client_connect_cmd = vpn._get_client_connect_cmd(protocol)
+    client_disconnect_cmd = vpn._get_client_disconnect_cmd(protocol)
+    verify_cmd = (
+        f"ping -c {cfg.tests.latency.verify_ping_count} -W 3 {server_vpn_ip}"
+    )
+    latency_cmd = (
+        f"ping -i {cfg.tests.latency.ping_interval_sec} "
+        f"-c {cfg.tests.latency.ping_count} {server_vpn_ip}"
+    )
+    iperf_cmd = (
+        f"iperf3 -c {server_vpn_ip} -p {cfg.infrastructure.vm1.iperf3_port} "
+        f"-t {cfg.tests.throughput.iperf3_duration_sec} -P {cfg.tests.throughput.iperf3_parallel} -J"
+    )
+    cpu_cmd = (
+        f"vmstat {cfg.tests.cpu.vmstat_interval_sec} {cfg.tests.cpu.vmstat_samples}"
+    )
 
     # ── Step 1: Apply network condition ───────────────────────────────────────
     _state.phase = TestPhase.APPLYING_CONDITION
     await send_status("applying_condition", f"Applying {condition_key} preset…")
+    await send_status("applying_condition", f"{client_vm.value.upper()}$ ip route show default | awk '/default/ {{print $5; exit}}'")
+    await send_status("applying_condition", f"{client_vm.value.upper()}$ sudo tc qdisc replace dev <iface> root netem ...")
     await send_progress(10, "Applying network condition")
     await netem.apply(condition_key)
 
     # ── Step 2: Start VPN server on VM1 ───────────────────────────────────────
     _state.phase = TestPhase.STARTING_VPN_SERVER
     await send_status("starting_vpn_server", f"Starting {protocol.value} server…")
+    await send_status("starting_vpn_server", f"VM1$ sudo systemctl start {server_service}")
     await send_progress(20, "Starting VPN server")
     await vpn.start_server(protocol)
 
     # ── Step 3: Connect VPN client on VM2 ─────────────────────────────────────
     _state.phase = TestPhase.CONNECTING_CLIENT
     await send_status("connecting_client", "Connecting VPN client…")
+    await send_status("connecting_client", f"{client_vm.value.upper()}$ {client_connect_cmd}")
     await send_progress(30, "Connecting VPN client")
     await vpn.start_client(protocol)
 
     # ── Step 4: Verify tunnel ─────────────────────────────────────────────────
     _state.phase = TestPhase.VERIFYING_TUNNEL
     await send_status("verifying_tunnel", "Verifying tunnel connectivity…")
+    await send_status("verifying_tunnel", f"{client_vm.value.upper()}$ {verify_cmd}")
     await send_progress(40, "Verifying tunnel")
     try:
         await vpn.verify_tunnel(protocol)
@@ -265,6 +376,7 @@ async def _run_single_protocol(
     _state.phase = TestPhase.RUNNING_LATENCY
     vpn_ip = vpn._get_server_vpn_ip(protocol)
     await send_status("running_latency", "Running latency test (ping)…")
+    await send_status("running_latency", f"{client_vm.value.upper()}$ {latency_cmd}")
     await send_progress(55, "Collecting latency samples")
 
     result.latency_samples = await metrics.collect_latency(
@@ -276,6 +388,9 @@ async def _run_single_protocol(
     # ── Step 6: Throughput test ───────────────────────────────────────────────
     _state.phase = TestPhase.RUNNING_THROUGHPUT
     await send_status("running_throughput", "Running throughput test (iperf3)…")
+    await send_status("running_throughput", f"VM1$ iperf3 -s -p {cfg.infrastructure.vm1.iperf3_port} -D --logfile /tmp/iperf3.log")
+    await send_status("running_throughput", f"{client_vm.value.upper()}$ {iperf_cmd}")
+    await send_status("running_throughput", f"{client_vm.value.upper()}$ {iperf_cmd} -R")
     await send_progress(75, "Measuring throughput")
 
     result.throughput_samples = await metrics.collect_throughput(
@@ -287,6 +402,7 @@ async def _run_single_protocol(
     # ── Step 7: CPU collection ────────────────────────────────────────────────
     _state.phase = TestPhase.COLLECTING_CPU
     await send_status("collecting_cpu", "Collecting CPU usage (vmstat)…")
+    await send_status("collecting_cpu", f"VM1$ {cpu_cmd}")
     await send_progress(85, "Collecting CPU metrics")
 
     result.cpu_samples = await metrics.collect_cpu(callback=broadcast)
@@ -298,10 +414,14 @@ async def _run_single_protocol(
     # Re-validate aggregates (model_validator only fires on construction)
     result = ProtocolTestResult.model_validate(result.model_dump())
     result.score = compute_score(result)
+    result.dpi_resistance_score = compute_dpi_resistance_score(result)
 
     # ── Step 9: Cleanup ───────────────────────────────────────────────────────
     _state.phase = TestPhase.CLEANING_UP
     await send_status("cleaning_up", "Cleaning up tunnel and conditions…")
+    await send_status("cleaning_up", f"{client_vm.value.upper()}$ {client_disconnect_cmd}")
+    await send_status("cleaning_up", f"VM1$ sudo systemctl stop {server_service}")
+    await send_status("cleaning_up", f"{client_vm.value.upper()}$ sudo tc qdisc del dev <iface> root 2>/dev/null || true")
     await send_progress(95, "Cleaning up")
 
     await vpn.stop_client(protocol)
@@ -312,7 +432,7 @@ async def _run_single_protocol(
     return result
 
 
-async def _run_test(condition: NetworkCondition, protocol: VpnProtocol) -> None:
+async def _run_test(condition: NetworkCondition, protocol: VpnProtocol, client_vm: ClientVm) -> None:
     ssh_mgr = get_ssh_manager()
     condition_key = condition.value if hasattr(condition, "value") else condition
     protocols = (
@@ -331,7 +451,7 @@ async def _run_test(condition: NetworkCondition, protocol: VpnProtocol) -> None:
                 f"▶ Starting {proto.value} under {condition_key}",
             )
 
-            result = await _run_single_protocol(proto, condition_key, ssh_mgr)
+            result = await _run_single_protocol(proto, condition_key, ssh_mgr, client_vm)
             _state.results.append(result)
 
         # Mark best result as recommended
@@ -349,6 +469,7 @@ async def _run_test(condition: NetworkCondition, protocol: VpnProtocol) -> None:
                 avg_throughput_mbps=res.avg_throughput_mbps,
                 avg_cpu_percent=res.avg_cpu_percent,
                 score=res.score,
+                dpi_resistance_score=res.dpi_resistance_score,
                 recommended=res.recommended,
             )
             await broadcast(final.model_dump())
@@ -408,13 +529,31 @@ async def start_test(req: StartTestRequest) -> JSONResponse:
             content={"detail": "A test is already running"},
         )
 
+    cfg = get_config()
+    if req.client_vm == ClientVm.VM3:
+        from backend.services.runtime_config import get_runtime_config
+        _rt = get_runtime_config()
+        # Runtime config (Settings paneli) önce kontrol edilir, sonra config.yaml
+        _vm3_host = (
+            (_rt.vm3.host or "").strip()
+            or (cfg.infrastructure.vm3.host if cfg.infrastructure.vm3 else "")
+        ).strip()
+        if not _vm3_host:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "detail": "VM3 seçildi ama config.yaml / Settings içinde VM3 host boş. VM3 IP/host girip tekrar deneyin."
+                },
+            )
+
     _state.running = True
     _state.protocol = VpnProtocol(req.protocol)
     _state.condition = NetworkCondition(req.condition)
     _state.phase = TestPhase.APPLYING_CONDITION
+    client_vm = ClientVm(req.client_vm)
 
     _state.task = asyncio.create_task(
-        _run_test(_state.condition, _state.protocol)
+        _run_test(_state.condition, _state.protocol, client_vm)
     )
 
     logger.info("test_requested", protocol=req.protocol, condition=req.condition)

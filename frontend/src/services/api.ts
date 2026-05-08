@@ -3,7 +3,7 @@
  * Base URL comes from env vars — no hardcoded values.
  */
 
-import type { NetworkCondition, PresetsMap, VpnProtocol } from "@/types";
+import type { ClientVm, NetworkCondition, PresetsMap, VpnProtocol } from "@/types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL as string ?? "http://localhost:8000";
 
@@ -27,6 +27,7 @@ async function request<T>(
 export interface StartTestPayload {
   condition: NetworkCondition;
   protocol: VpnProtocol;
+  client_vm?: ClientVm;
 }
 
 export interface StartTestResponse {
@@ -58,6 +59,7 @@ export interface VmSettings {
 export interface InfrastructureSettings {
   vm1: VmSettings;
   vm2: VmSettings;
+  vm3?: VmSettings | null;
   configured: boolean;
 }
 
@@ -94,7 +96,7 @@ export const api = {
   getConfig: (): Promise<InfrastructureSettings> =>
     request("/api/config"),
 
-  saveConfig: (payload: { vm1: VmSettings; vm2: VmSettings }): Promise<InfrastructureSettings> =>
+  saveConfig: (payload: { vm1: VmSettings; vm2: VmSettings; vm3?: VmSettings | null }): Promise<InfrastructureSettings> =>
     request("/api/config", {
       method: "POST",
       body: JSON.stringify(payload),

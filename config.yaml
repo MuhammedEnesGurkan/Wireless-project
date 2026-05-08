@@ -1,6 +1,6 @@
 infrastructure:
   vm1:
-    host: "192.168.80.141"
+    host: "100.70.73.68"
     port: 22
     user: "wazuh"
     ssh_key_path: ""
@@ -8,9 +8,19 @@ infrastructure:
     iperf3_port: 5201
 
   vm2:
-    host: "192.168.80.145"
+    host: "100.101.234.82"
     port: 22
     user: "sshka"
+    ssh_key_path: ""
+    network_interface: "eth0"
+    iperf3_port: 5201
+
+  # Optional extra client/test node. If you want to run tests from VM3,
+  # it must have the same client toolchain as VM2 (wireguard/openvpn/strongswan/iperf3/tc).
+  vm3:
+    host: "100.85.164.55"
+    port: 22
+    user: "agurk"
     ssh_key_path: ""
     network_interface: "eth0"
     iperf3_port: 5201

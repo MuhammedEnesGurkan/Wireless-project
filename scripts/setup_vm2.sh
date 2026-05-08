@@ -18,8 +18,8 @@
 
 set -euo pipefail
 
-VM1_IP="${VM1_IP:-192.168.80.141}"
-IFACE="${IFACE:-ens33}"
+VM1_IP="${VM1_IP:-100.70.73.68}"
+IFACE="${IFACE:-tailscale0}"
 KEY_DIR="${KEY_DIR:-/etc/vpn-bench/keys}"
 OVPN_CLIENT_DIR="${OVPN_CLIENT_DIR:-/etc/openvpn/client}"
 WG_PORT="${WG_PORT:-51820}"

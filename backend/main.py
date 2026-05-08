@@ -40,6 +40,9 @@ def _init_runtime_config_from_env() -> None:
 
     vm1_password = os.getenv("VM1_SSH_PASSWORD", "")
     vm2_password = os.getenv("VM2_SSH_PASSWORD", "")
+    vm3_password = os.getenv("VM3_SSH_PASSWORD", "")
+
+    cfg_vm3 = cfg.infrastructure.vm3
 
     update_runtime_config(
         vm1_host=os.getenv("VM1_HOST", cfg.infrastructure.vm1.host),
@@ -55,11 +58,19 @@ def _init_runtime_config_from_env() -> None:
         vm2_ssh_key_path=os.getenv("VM2_SSH_KEY_PATH", cfg.infrastructure.vm2.ssh_key_path),
         vm2_ssh_password=vm2_password,
         vm2_use_password_auth=bool(vm2_password),
+
+        vm3_host=os.getenv("VM3_HOST", cfg_vm3.host if cfg_vm3 else ""),
+        vm3_port=int(os.getenv("VM3_SSH_PORT", str(cfg_vm3.port if cfg_vm3 else 22))),
+        vm3_user=os.getenv("VM3_SSH_USER", cfg_vm3.user if cfg_vm3 else ""),
+        vm3_ssh_key_path=os.getenv("VM3_SSH_KEY_PATH", cfg_vm3.ssh_key_path if cfg_vm3 else ""),
+        vm3_ssh_password=vm3_password,
+        vm3_use_password_auth=bool(vm3_password),
     )
     logger.info(
         "runtime_config_initialized",
         vm1=os.getenv("VM1_HOST", cfg.infrastructure.vm1.host),
         vm2=os.getenv("VM2_HOST", cfg.infrastructure.vm2.host),
+        vm3=os.getenv("VM3_HOST", cfg_vm3.host if cfg_vm3 else ""),
         auth="password" if vm1_password else "key",
     )
 

@@ -19,12 +19,12 @@
 set -euo pipefail
 
 # ── Override these via environment or .env.example ────────────────────────────
-VM1_HOST="${VM1_HOST:-192.168.80.141}"
-VM1_USER="${VM1_USER:-ubuntu}"
+VM1_HOST="${VM1_HOST:-100.70.73.68}"
+VM1_USER="${VM1_USER:-wazuh}"
 VM1_PORT="${VM1_PORT:-22}"
 
-VM2_HOST="${VM2_HOST:-192.168.80.145}"
-VM2_USER="${VM2_USER:-ubuntu}"
+VM2_HOST="${VM2_HOST:-100.101.234.82}"
+VM2_USER="${VM2_USER:-sshka}"
 VM2_PORT="${VM2_PORT:-22}"
 
 SSH_KEY="${SSH_KEY:-~/.ssh/vpn_bench_key}"
@@ -34,7 +34,7 @@ WG_SERVER_ADDR="${WG_SERVER_ADDR:-10.200.0.1/24}"
 WG_CLIENT_ADDR="${WG_CLIENT_ADDR:-10.200.0.2/24}"
 WG_CLIENT_IP_ONLY="${WG_CLIENT_IP_ONLY:-10.200.0.2/32}"
 
-IFACE="${IFACE:-ens33}"
+IFACE="${IFACE:-tailscale0}"
 
 # ── SSH helpers ───────────────────────────────────────────────────────────────
 ssh_vm1() { ssh -i "${SSH_KEY}" -p "${VM1_PORT}" -o StrictHostKeyChecking=no "${VM1_USER}@${VM1_HOST}" "$@"; }

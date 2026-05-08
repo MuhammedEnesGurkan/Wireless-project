@@ -15,6 +15,8 @@ export type NetworkCondition =
   | "mobile_4g"
   | "stress_dos";
 
+export type ClientVm = "vm2" | "vm3";
+
 export type TestPhase =
   | "idle"
   | "applying_condition"
@@ -68,6 +70,7 @@ export interface WsResultFinal {
   avg_throughput_mbps: number;
   avg_cpu_percent: number;
   score: number;
+  dpi_resistance_score: number;
   recommended: boolean;
 }
 
@@ -159,5 +162,6 @@ export interface SummaryRow {
   avg_throughput_mbps: number;
   avg_cpu_percent: number;
   score: number;
+  dpi_resistance_score: number;
   recommended: boolean;
 }

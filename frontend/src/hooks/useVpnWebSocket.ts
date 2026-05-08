@@ -62,6 +62,17 @@ function connect() {
       status: "success",
     });
     startHeartbeat(ws);
+
+    // Sync state from backend on (re)connect — fixes stale "Running..." UI
+    fetch(`${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"}/api/test/status`)
+      .then((r) => r.json())
+      .then((status: { running: boolean; phase: string }) => {
+        if (!status.running) {
+          getActions().setRunning(false);
+          getActions().setPhase("idle");
+        }
+      })
+      .catch(() => { /* ignore — WS message will handle it */ });
   };
 
   ws.onmessage = (ev: MessageEvent<string>) => {
@@ -75,6 +86,24 @@ function connect() {
   ws.onclose = (ev) => {
     clearHeartbeat();
     getActions().setWsConnected(false);
+
+    // If UI thinks test is running, verify with backend immediately
+    if (getActions().running) {
+      fetch(`${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"}/api/test/status`)
+        .then((r) => r.json())
+        .then((status: { running: boolean; phase: string }) => {
+          if (!status.running) {
+            getActions().setRunning(false);
+            getActions().setPhase("idle");
+            getActions().appendLog({
+              message: "⚠️ Bağlantı koptu — test zaten tamamlandı veya hata ile sonuçlandı.",
+              phase: "error",
+              status: "error",
+            });
+          }
+        })
+        .catch(() => { /* backend unreachable, keep UI as-is */ });
+    }
 
     // Normal closure (code 1000) or no active mounts — don't reconnect
     if (ev.code === 1000 || _mountCount === 0) return;
@@ -152,7 +181,7 @@ function dispatch(msg: WsMessage) {
     case "result_final":
       a.addResult(msg);
       a.appendLog({
-        message: `✅ ${msg.protocol}: score=${msg.score} · latency=${msg.avg_latency_ms.toFixed(1)}ms · ${msg.avg_throughput_mbps.toFixed(1)}Mbps`,
+        message: `✅ ${msg.protocol}: score=${msg.score} · dpi=${msg.dpi_resistance_score.toFixed(1)} · latency=${msg.avg_latency_ms.toFixed(1)}ms · ${msg.avg_throughput_mbps.toFixed(1)}Mbps`,
         phase: "complete",
         status: "success",
       });
