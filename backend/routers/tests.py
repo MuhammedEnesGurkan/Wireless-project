@@ -304,6 +304,28 @@ def _humanize_ssh_error(exc: SshCommandError) -> str:
             "VM üzerinde 'sudo apt install openvpn' çalıştırın."
         )
 
+    if "openvpn client config/cert files missing" in stderr:
+        return (
+            "SSH command failed: OpenVPN client config veya sertifika dosyaları eksik. "
+            "Client VM üzerinde setup scriptini çalıştırın, ardından hosttan "
+            "`bash scripts/generate_vpn_configs.sh` ile sertifikaları tekrar dağıtın. "
+            f"Detay:\n{exc.stderr}"
+        )
+
+    if "options error" in stderr or "tls error" in stderr or "auth_failed" in stderr:
+        return (
+            "SSH command failed: OpenVPN config/log hatası yakalandı. "
+            "Aşağıdaki log satırları gerçek sebebi gösteriyor:\n"
+            f"{exc.stderr}"
+        )
+
+    if exc.exit_status == 124 and "iperf3" in cmd:
+        return (
+            "Throughput testi tamamlanamadı (timeout). "
+            "Ağ üzerindeki aşırı yüklenme veya paket kayıpları iperf3'ün sonuç raporunu iletmesini engelledi. "
+            "Bağlantı zayıf veya MTU uyuşmazlığı olabilir."
+        )
+
     return f"SSH command failed: {exc}"
 
 
@@ -480,18 +502,18 @@ async def _run_test(condition: NetworkCondition, protocol: VpnProtocol, client_v
     except asyncio.CancelledError:
         logger.info("test_cancelled")
         await send_error("cancelled", "Test was stopped by user")
-        await _emergency_cleanup(protocols, condition_key, ssh_mgr)
+        await _emergency_cleanup(protocols, condition_key, ssh_mgr, client_vm)
     except SshCommandError as exc:
         logger.error("ssh_error", exc=str(exc))
         await send_error("ssh_error", _humanize_ssh_error(exc))
-        await _emergency_cleanup(protocols, condition_key, ssh_mgr)
+        await _emergency_cleanup(protocols, condition_key, ssh_mgr, client_vm)
     except TunnelVerificationError as exc:
         logger.error("tunnel_error", exc=str(exc))
-        await _emergency_cleanup(protocols, condition_key, ssh_mgr)
+        await _emergency_cleanup(protocols, condition_key, ssh_mgr, client_vm)
     except Exception as exc:  # noqa: BLE001
         logger.exception("test_error", exc=str(exc))
         await send_error("unknown", f"Unexpected error: {exc}")
-        await _emergency_cleanup(protocols, condition_key, ssh_mgr)
+        await _emergency_cleanup(protocols, condition_key, ssh_mgr, client_vm)
     finally:
         _state.running = False
         _state.phase = TestPhase.IDLE
@@ -501,10 +523,11 @@ async def _emergency_cleanup(
     protocols: list[VpnProtocol],
     condition_key: str,
     ssh_mgr,
+    client_vm: ClientVm = ClientVm.VM2,
 ) -> None:
     """Best-effort cleanup after errors or cancellation."""
-    vpn = VpnManager(ssh_mgr)
-    netem = NetemManager(ssh_mgr)
+    vpn = VpnManager(ssh_mgr, client_vm=client_vm.value)
+    netem = NetemManager(ssh_mgr, client_vm=client_vm.value)
     try:
         for proto in protocols:
             await vpn.stop_client(proto)

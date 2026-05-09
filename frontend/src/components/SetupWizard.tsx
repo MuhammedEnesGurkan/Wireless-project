@@ -2,7 +2,7 @@
  * SetupWizard — shown automatically on first load when VMs are not configured.
  * Also provides ConnectivityStatusCard for the sidebar showing live VM status.
  */
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertTriangle, Wifi, WifiOff, CheckCircle2, XCircle,

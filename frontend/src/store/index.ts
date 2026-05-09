@@ -95,7 +95,7 @@ const MAX_CPU_SAMPLES = 60;
 // ── Store implementation ───────────────────────────────────────────────────────
 
 export const useStore = create<Store>()(
-  subscribeWithSelector((set, get) => ({
+  subscribeWithSelector((set) => ({
     // ── testSlice ──────────────────────────────────────────────────────────────
     running: false,
     phase: "idle",

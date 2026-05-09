@@ -28,13 +28,16 @@ class NetemManager:
         return await self._ssh.run_vm2(command, check=check)
 
     async def _get_iface(self) -> str:
-        """Return client VM network interface, auto-detecting via `ip route`."""
+        """Return client VM network interface, preferring explicit config."""
         if self._detected_iface:
             return self._detected_iface
         if self._client_vm == "vm3" and self._cfg.infrastructure.vm3 is not None:
             configured = self._cfg.infrastructure.vm3.network_interface
         else:
             configured = self._cfg.infrastructure.vm2.network_interface
+        if configured:
+            self._detected_iface = configured
+            return configured
         try:
             result = await self._run_client(
                 "ip route show default | awk '/default/ {print $5; exit}'",
@@ -111,7 +114,12 @@ class NetemManager:
 
     async def reset(self) -> None:
         iface = await self._get_iface()
-        cmd = f"sudo tc qdisc del dev {iface} root 2>/dev/null || true"
+        if self._client_vm == "vm3":
+            # For VM3 (Crostini), we use fq_codel as a healthy default instead of just deleting,
+            # which can sometimes lead to issues in containerized network namespaces.
+            cmd = f"sudo tc qdisc replace dev {iface} root fq_codel 2>/dev/null || true"
+        else:
+            cmd = f"sudo tc qdisc del dev {iface} root 2>/dev/null || true"
         logger.info("netem_reset", iface=iface)
         await self._run_client(cmd, check=False)
         await self._stop_hping3()

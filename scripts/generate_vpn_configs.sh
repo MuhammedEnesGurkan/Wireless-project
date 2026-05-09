@@ -27,6 +27,10 @@ VM2_HOST="${VM2_HOST:-100.101.234.82}"
 VM2_USER="${VM2_USER:-sshka}"
 VM2_PORT="${VM2_PORT:-22}"
 
+VM3_HOST="${VM3_HOST-100.85.164.55}"
+VM3_USER="${VM3_USER:-agurk}"
+VM3_PORT="${VM3_PORT:-22}"
+
 SSH_KEY="${SSH_KEY:-~/.ssh/vpn_bench_key}"
 
 WG_PORT="${WG_PORT:-51820}"
@@ -39,6 +43,7 @@ IFACE="${IFACE:-tailscale0}"
 # ── SSH helpers ───────────────────────────────────────────────────────────────
 ssh_vm1() { ssh -i "${SSH_KEY}" -p "${VM1_PORT}" -o StrictHostKeyChecking=no "${VM1_USER}@${VM1_HOST}" "$@"; }
 ssh_vm2() { ssh -i "${SSH_KEY}" -p "${VM2_PORT}" -o StrictHostKeyChecking=no "${VM2_USER}@${VM2_HOST}" "$@"; }
+ssh_vm3() { ssh -i "${SSH_KEY}" -p "${VM3_PORT}" -o StrictHostKeyChecking=no "${VM3_USER}@${VM3_HOST}" "$@"; }
 
 info()  { echo -e "\033[0;32m[INFO]\033[0m  $*"; }
 error() { echo -e "\033[0;31m[ERROR]\033[0m $*" >&2; exit 1; }
@@ -94,7 +99,7 @@ WG_CONF
 
 # ── 3. Copy OpenVPN client certs from VM1 to VM2 ─────────────────────────────
 distribute_openvpn_certs() {
-  info "Copying OpenVPN certificates from VM1 → VM2…"
+  info "Copying OpenVPN certificates from VM1 to client nodes…"
   TMPDIR_HOST=$(mktemp -d)
 
   ssh_vm1 "sudo tar -czf /tmp/ovpn-client-certs.tar.gz \
@@ -107,37 +112,67 @@ distribute_openvpn_certs() {
     "${VM1_USER}@${VM1_HOST}:/tmp/ovpn-client-certs.tar.gz" \
     "${TMPDIR_HOST}/ovpn-client-certs.tar.gz"
 
-  scp -i "${SSH_KEY}" -P "${VM2_PORT}" \
-    "${TMPDIR_HOST}/ovpn-client-certs.tar.gz" \
-    "${VM2_USER}@${VM2_HOST}:/tmp/"
+  copy_openvpn_bundle_to_client "${VM2_HOST}" "${VM2_USER}" "${VM2_PORT}" "VM2"
 
-  ssh_vm2 "sudo mkdir -p /etc/openvpn/client && \
-    sudo tar -xzf /tmp/ovpn-client-certs.tar.gz -C / && \
-    sudo chmod 600 /etc/openvpn/client/*.key"
+  if [[ -n "${VM3_HOST}" ]]; then
+    copy_openvpn_bundle_to_client "${VM3_HOST}" "${VM3_USER}" "${VM3_PORT}" "VM3"
+  fi
 
   rm -rf "${TMPDIR_HOST}"
   info "OpenVPN certs distributed ✓"
 }
 
+copy_openvpn_bundle_to_client() {
+  local host="$1"
+  local user="$2"
+  local port="$3"
+  local label="$4"
+
+  info "Copying OpenVPN client certs to ${label}..."
+  scp -i "${SSH_KEY}" -P "${port}" \
+    "${TMPDIR_HOST}/ovpn-client-certs.tar.gz" \
+    "${user}@${host}:/tmp/"
+
+  ssh -i "${SSH_KEY}" -p "${port}" -o StrictHostKeyChecking=no "${user}@${host}" \
+    "sudo mkdir -p /etc/openvpn/client && \
+     sudo tar -xzf /tmp/ovpn-client-certs.tar.gz -C / && \
+     sudo chmod 600 /etc/openvpn/client/*.key"
+}
+
 # ── 4. Copy IPSec CA cert from VM1 to VM2 ────────────────────────────────────
 distribute_ipsec_ca() {
-  info "Copying IPSec CA cert from VM1 → VM2…"
+  info "Copying IPSec CA cert from VM1 to client nodes…"
   TMPDIR_HOST=$(mktemp -d)
 
   scp -i "${SSH_KEY}" -P "${VM1_PORT}" \
     "${VM1_USER}@${VM1_HOST}:/etc/ipsec.d/cacerts/ca.cert.pem" \
     "${TMPDIR_HOST}/ca.cert.pem"
 
-  scp -i "${SSH_KEY}" -P "${VM2_PORT}" \
-    "${TMPDIR_HOST}/ca.cert.pem" \
-    "${VM2_USER}@${VM2_HOST}:/tmp/"
+  copy_ipsec_ca_to_client "${VM2_HOST}" "${VM2_USER}" "${VM2_PORT}" "VM2"
 
-  ssh_vm2 "sudo mkdir -p /etc/ipsec.d/cacerts && \
-    sudo mv /tmp/ca.cert.pem /etc/ipsec.d/cacerts/ && \
-    sudo ipsec reload 2>/dev/null || true"
+  if [[ -n "${VM3_HOST}" ]]; then
+    copy_ipsec_ca_to_client "${VM3_HOST}" "${VM3_USER}" "${VM3_PORT}" "VM3"
+  fi
 
   rm -rf "${TMPDIR_HOST}"
   info "IPSec CA distributed ✓"
+}
+
+copy_ipsec_ca_to_client() {
+  local host="$1"
+  local user="$2"
+  local port="$3"
+  local label="$4"
+
+  info "Copying IPSec CA to ${label}..."
+  scp -i "${SSH_KEY}" -P "${port}" \
+    "${TMPDIR_HOST}/ca.cert.pem" \
+    "${user}@${host}:/tmp/"
+
+  ssh -i "${SSH_KEY}" -p "${port}" -o StrictHostKeyChecking=no "${user}@${host}" \
+    "sudo mkdir -p /etc/ipsec.d/cacerts && \
+     sudo mv /tmp/ca.cert.pem /etc/ipsec.d/cacerts/ && \
+     sudo ipsec reload 2>/dev/null || true"
 }
 
 # ── 5. Quick smoke test ───────────────────────────────────────────────────────

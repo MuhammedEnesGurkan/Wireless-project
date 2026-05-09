@@ -12,7 +12,7 @@ infrastructure:
     port: 22
     user: "sshka"
     ssh_key_path: ""
-    network_interface: "eth0"
+    network_interface: "tailscale0"
     iperf3_port: 5201
 
   # Optional extra client/test node. If you want to run tests from VM3,
@@ -22,7 +22,7 @@ infrastructure:
     port: 22
     user: "agurk"
     ssh_key_path: ""
-    network_interface: "eth0"
+    network_interface: "tailscale0"
     iperf3_port: 5201
 
 ssh:
@@ -125,14 +125,14 @@ network_conditions:
 
 tests:
   latency:
-    ping_interval_sec: 0.5
-    ping_count: 120
+    ping_interval_sec: 0.2
+    ping_count: 40
     verify_ping_count: 3
     verify_max_attempts: 3
     verify_wait_sec: 5
 
   throughput:
-    iperf3_duration_sec: 30
+    iperf3_duration_sec: 5
     iperf3_parallel: 1
     iperf3_json: true
 

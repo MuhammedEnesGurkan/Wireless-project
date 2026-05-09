@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from backend.core.config import get_config
 from backend.core.logging import get_logger
+from backend.services.auto_repair import AutoRepairManager
 from backend.services.runtime_config import get_runtime_config, update_runtime_config
 from backend.services.ssh_manager import get_ssh_manager
 
@@ -61,6 +62,13 @@ class ConnectivityResult(BaseModel):
     success: bool
     message: str
     latency_ms: Optional[float]
+
+
+class AutoRepairRequest(BaseModel):
+    apply_fixes: bool = Field(
+        default=False,
+        description="If true, run safe idempotent fixes over SSH after checks fail.",
+    )
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -244,3 +252,18 @@ async def test_connectivity() -> list[ConnectivityResult]:
     tasks = [_test_vm(vm) for vm in vm_names]
     results = list(await asyncio.gather(*tasks))
     return results
+
+
+@router.post("/auto-repair")
+async def auto_repair(payload: AutoRepairRequest) -> JSONResponse:
+    """
+    Check all configured VMs/protocol prerequisites and optionally apply safe fixes.
+
+    This does not regenerate WireGuard/OpenVPN keys silently. It fixes known
+    idempotent pieces such as packages, IPsec/Tailscale plugins, CA copy,
+    route helper, ipsec0, and benchmark firewall rules.
+    """
+    ssh = get_ssh_manager()
+    repair = AutoRepairManager(ssh)
+    report = await repair.run(apply_fixes=payload.apply_fixes)
+    return JSONResponse(content=report.model_dump())

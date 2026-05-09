@@ -96,12 +96,10 @@ class MetricsCollector:
         duration = cfg.iperf3_duration_sec
         parallel = cfg.iperf3_parallel
 
-        # Start iperf3 server on VM1 (non-blocking, daemonised)
-        await self._ssh.run_vm1(
-            f"pkill iperf3 2>/dev/null || true && "
-            f"iperf3 -s -p {iperf_port} -D --logfile /tmp/iperf3.log"
-        )
-        await asyncio.sleep(1)
+        await self._start_iperf3_server(iperf_port)
+
+        if protocol == "ipsec":
+            await self._ensure_ipsec_route(server_ip)
 
         samples: list[ThroughputSample] = []
 
@@ -159,22 +157,71 @@ class MetricsCollector:
         parallel: int,
         reverse: bool = False,
     ) -> float:
+        last_error: Exception | None = None
+        for attempt in range(1, 3):
+            try:
+                return await self._run_iperf3_once(
+                    direction=direction,
+                    server_ip=server_ip,
+                    port=port,
+                    duration=duration,
+                    parallel=parallel,
+                    reverse=reverse,
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                logger.warning(
+                    "iperf3_attempt_failed",
+                    direction=direction,
+                    attempt=attempt,
+                    exc=str(exc),
+                )
+                if attempt == 1:
+                    await self._start_iperf3_server(port)
+                    await asyncio.sleep(1)
+        assert last_error is not None
+        raise last_error
+
+    async def _run_iperf3_once(
+        self,
+        *,
+        direction: str,
+        server_ip: str,
+        port: int,
+        duration: int,
+        parallel: int,
+        reverse: bool = False,
+    ) -> float:
         rev_flag = "-R" if reverse else ""
+        # Short test duration (10s) needs less buffer, but still enough for JSON exchange
+        timeout_sec = duration + 20
         cmd = (
+            f"timeout {timeout_sec} "
             f"iperf3 -c {server_ip} -p {port} -t {duration} "
+            f"--connect-timeout 5 "
             f"-P {parallel} -J {rev_flag}"
         )
-        result = await self._run_client(cmd)
+        result = await self._run_client(cmd, check=False)
         
         try:
             data = json.loads(result.stdout)
         except json.JSONDecodeError:
             from backend.services.ssh_manager import SshCommandError
-            raise SshCommandError(cmd, result.exit_status, result.stdout or "Invalid JSON and no stderr")
+            stderr = result.stderr or ""
+            stdout = result.stdout or ""
+            details = stderr or stdout or "Invalid JSON and no stderr/stdout"
+            raise SshCommandError(cmd, result.exit_status, details)
             
         if "error" in data:
             from backend.services.ssh_manager import SshCommandError
             raise SshCommandError(cmd, result.exit_status, data["error"])
+        if result.exit_status != 0:
+            from backend.services.ssh_manager import SshCommandError
+            raise SshCommandError(
+                cmd,
+                result.exit_status,
+                result.stderr or result.stdout or "iperf3 failed without output",
+            )
 
         try:
             bits_per_sec = data["end"]["sum_received"]["bits_per_second"]
@@ -187,6 +234,36 @@ class MetricsCollector:
         mbps = bits_per_sec / 1_000_000
         logger.debug("iperf3_result", direction=direction, mbps=mbps)
         return round(mbps, 2)
+
+    async def _start_iperf3_server(self, port: int) -> None:
+        await self._ssh.run_vm1(
+            "sudo iptables -I INPUT -s 10.8.0.0/24 -p tcp --dport "
+            f"{port} -j ACCEPT 2>/dev/null || true; "
+            "sudo iptables -I INPUT -s 10.9.0.0/24 -p tcp --dport "
+            f"{port} -j ACCEPT 2>/dev/null || true; "
+            "sudo iptables -I INPUT -s 10.10.0.0/24 -p tcp --dport "
+            f"{port} -j ACCEPT 2>/dev/null || true; "
+            "sudo iptables -I INPUT -s 10.200.0.0/24 -p tcp --dport "
+            f"{port} -j ACCEPT 2>/dev/null || true; "
+            "sudo pkill iperf3 2>/dev/null || true; "
+            "sleep 0.5; "
+            f"sudo rm -f /tmp/iperf3.log; "
+            f"sudo iperf3 -s -p {port} -D --logfile /tmp/iperf3.log; "
+            "sleep 1; "
+            f"sudo ss -ltnp | grep -q ':{port} ' || "
+            f"(sudo cat /tmp/iperf3.log >&2 2>/dev/null; exit 1)"
+        )
+
+    async def _ensure_ipsec_route(self, server_ip: str) -> None:
+        client_ip = self._cfg.vpn.ipsec.client_vpn_ip
+        if self._client_vm == "vm3" and self._cfg.infrastructure.vm3 is not None:
+            iface = self._cfg.infrastructure.vm3.network_interface or "tailscale0"
+        else:
+            iface = self._cfg.infrastructure.vm2.network_interface or "tailscale0"
+        await self._run_client(
+            f"sudo ip route replace {server_ip}/32 dev {iface} src {client_ip}",
+            check=False,
+        )
 
     # ── CPU ───────────────────────────────────────────────────────────────────
 

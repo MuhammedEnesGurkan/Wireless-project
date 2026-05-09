@@ -70,6 +70,26 @@ export interface ConnectivityResult {
   latency_ms: number | null;
 }
 
+export interface AutoRepairItem {
+  vm: string;
+  protocol: string;
+  check: string;
+  ok: boolean;
+  message: string;
+  fixed: boolean;
+}
+
+export interface AutoRepairReport {
+  apply_fixes: boolean;
+  summary: {
+    total: number;
+    ok: number;
+    failed: number;
+    fixed: number;
+  };
+  items: AutoRepairItem[];
+}
+
 export const api = {
   startTest: (payload: StartTestPayload): Promise<StartTestResponse> =>
     request("/api/test/start", {
@@ -104,4 +124,10 @@ export const api = {
 
   testConnectivity: (): Promise<ConnectivityResult[]> =>
     request("/api/config/test-connectivity", { method: "POST" }),
+
+  autoRepair: (applyFixes: boolean): Promise<AutoRepairReport> =>
+    request("/api/config/auto-repair", {
+      method: "POST",
+      body: JSON.stringify({ apply_fixes: applyFixes }),
+    }),
 };

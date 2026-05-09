@@ -142,6 +142,9 @@ check_vm2() {
 
 check_vm3() {
   echo "== Checking VM3 setup =="
+  check_common
+  check_cmd openvpn "openvpn installed"
+  check_cmd ipsec "strongSwan installed (ipsec)"
   check_cmd iperf3 "iperf3 installed"
   check_cmd hping3 "hping3 installed"
   check_cmd tc "tc installed"
@@ -151,8 +154,12 @@ check_vm3() {
   check_cmd nc "netcat installed (nc)"
   check_cmd jq "jq installed"
   check_cmd curl "curl installed"
-  check_file /etc/sudoers.d/vpn-bench "sudoers drop-in exists"
-  check_sudoers
+  check_file /etc/openvpn/client/client-udp.conf "OpenVPN UDP client config exists"
+  check_file /etc/openvpn/client/client-tcp.conf "OpenVPN TCP client config exists"
+  check_file /etc/ipsec.conf "IPSec config exists"
+  check_file /etc/ipsec.secrets "IPSec secrets exists"
+  check_contains /etc/wireguard/wg0.conf "Endpoint   = ${VM1_IP}:51820" "WireGuard endpoint points VM1 (${VM1_IP})"
+  check_contains /etc/ipsec.conf "right=${VM1_IP}" "IPSec right host matches VM1 IP (${VM1_IP})"
   if tc qdisc show dev "${IFACE}" >/dev/null 2>&1; then
     pass "tc qdisc accessible on ${IFACE}"
   else

@@ -3,6 +3,7 @@
 # setup_vm3.sh — VPN Benchmark Suite: VM3 (Realtime Network Test Node) Setup
 # =============================================================================
 # VM3 purpose:
+#   • Act as an optional VPN client/test node
 #   • Apply dynamic network conditions (tc netem)
 #   • Generate test traffic (iperf3, hping3, ping)
 #   • Provide diagnostics (mtr, tcpdump, netcat)
@@ -13,12 +14,15 @@
 #   sudo bash setup_vm3.sh
 #
 # Optional env vars:
-#   IFACE=eth0
+#   VM1_IP=100.70.73.68 IFACE=eth0
 # =============================================================================
 
 set -euo pipefail
 
+VM1_IP="${VM1_IP:-100.70.73.68}"
 IFACE="${IFACE:-tailscale0}"
+OVPN_CLIENT_DIR="${OVPN_CLIENT_DIR:-/etc/openvpn/client}"
+WG_PORT="${WG_PORT:-51820}"
 
 info()  { echo -e "\033[0;32m[INFO]\033[0m  $*"; }
 warn()  { echo -e "\033[0;33m[WARN]\033[0m  $*"; }
@@ -42,6 +46,9 @@ install_packages() {
 
   info "Installing realtime network test toolchain..."
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    wireguard \
+    openvpn \
+    strongswan \
     iperf3 \
     hping3 \
     iproute2 \
@@ -56,6 +63,111 @@ install_packages() {
     dnsutils \
     procps \
     sysstat
+}
+
+setup_wireguard_client() {
+  info "Generating WireGuard client keys..."
+  mkdir -p /etc/wireguard
+  chmod 700 /etc/wireguard
+
+  if [[ ! -f /etc/wireguard/client_private.key ]]; then
+    wg genkey | tee /etc/wireguard/client_private.key | wg pubkey > /etc/wireguard/client_public.key
+    chmod 600 /etc/wireguard/client_private.key
+  fi
+
+  CLIENT_PRIVKEY=$(cat /etc/wireguard/client_private.key)
+  SERVER_PUBKEY="${SERVER_PUBKEY:-PLACEHOLDER_SERVER_PUBKEY}"
+
+  cat > /etc/wireguard/wg0.conf <<WG_CONF
+[Interface]
+Address    = 10.200.0.2/24
+PrivateKey = ${CLIENT_PRIVKEY}
+
+[Peer]
+PublicKey  = ${SERVER_PUBKEY}
+Endpoint   = ${VM1_IP}:${WG_PORT}
+AllowedIPs = 10.200.0.0/24
+PersistentKeepalive = 25
+WG_CONF
+
+  chmod 600 /etc/wireguard/wg0.conf
+  info "WireGuard client configured."
+}
+
+setup_openvpn_client() {
+  info "Writing OpenVPN client configs..."
+  mkdir -p "${OVPN_CLIENT_DIR}"
+
+  cat > "${OVPN_CLIENT_DIR}/client-udp.conf" <<EOF
+client
+dev tun
+proto udp
+remote ${VM1_IP} 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+ca   ${OVPN_CLIENT_DIR}/ca.crt
+cert ${OVPN_CLIENT_DIR}/vpn-client.crt
+key  ${OVPN_CLIENT_DIR}/vpn-client.key
+tls-auth ${OVPN_CLIENT_DIR}/ta.key 1
+cipher AES-256-GCM
+auth   SHA256
+compress lz4-v2
+verb 3
+EOF
+
+  cat > "${OVPN_CLIENT_DIR}/client-tcp.conf" <<EOF
+client
+dev tun
+proto tcp
+remote ${VM1_IP} 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+ca   ${OVPN_CLIENT_DIR}/ca.crt
+cert ${OVPN_CLIENT_DIR}/vpn-client.crt
+key  ${OVPN_CLIENT_DIR}/vpn-client.key
+tls-auth ${OVPN_CLIENT_DIR}/ta.key 1
+cipher AES-256-GCM
+auth   SHA256
+compress lz4-v2
+verb 3
+EOF
+
+  info "OpenVPN client configs written."
+}
+
+setup_ipsec_client() {
+  info "Writing strongSwan IPSec client config..."
+
+  IPSEC_USER="${IPSEC_USER:-vpnbench}"
+  IPSEC_PASS="${IPSEC_PASS:-changeme_strong_password}"
+
+  cat > /etc/ipsec.conf <<IPSEC_CONF
+config setup
+    charondebug="ike 1, knl 1, cfg 0"
+
+conn vpn-bench
+    auto=add
+    keyexchange=ikev2
+    left=%any
+    leftauth=eap-mschapv2
+    leftsourceip=%config
+    right=${VM1_IP}
+    rightid=${VM1_IP}
+    rightsubnet=0.0.0.0/0
+    rightauth=pubkey
+    eap_identity=${IPSEC_USER}
+    aaa_identity=%any
+IPSEC_CONF
+
+  : > /etc/ipsec.secrets
+  echo "${VM1_IP} : EAP \"${IPSEC_PASS}\"" >> /etc/ipsec.secrets
+  echo "${IPSEC_USER} : EAP \"${IPSEC_PASS}\"" >> /etc/ipsec.secrets
+
+  info "strongSwan client configured."
 }
 
 verify_interface() {
@@ -81,6 +193,9 @@ main() {
   require_root
   configure_sudoers
   install_packages
+  setup_wireguard_client
+  setup_openvpn_client
+  setup_ipsec_client
   verify_interface
   verify_netem
   prepare_dirs

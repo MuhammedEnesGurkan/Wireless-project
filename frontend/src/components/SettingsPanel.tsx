@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Settings, Save, Wifi, WifiOff, Loader2, Eye, EyeOff, CheckCircle2, XCircle,
+  Wrench, SearchCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { api, type VmSettings, type ConnectivityResult } from "@/services/api";
+import { api, type VmSettings, type ConnectivityResult, type AutoRepairReport } from "@/services/api";
 import { cn } from "@/lib/utils";
 
 // ── Simple input wrapper (no shadcn Input component was generated, use raw with vpn styles) ──
@@ -195,7 +195,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [vm3, setVm3] = useState<VmSettings>({ ...DEFAULT_VM });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [repairing, setRepairing] = useState<"check" | "fix" | null>(null);
   const [results, setResults] = useState<ConnectivityResult[]>([]);
+  const [repairReport, setRepairReport] = useState<AutoRepairReport | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -230,6 +232,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         });
       }
       setResults([]);
+      setRepairReport(null);
       setSaveError(null);
       setSaved(false);
     }).catch(() => {});
@@ -272,6 +275,30 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
       setTesting(false);
+    }
+  }, [vm1, vm2, vm3]);
+
+  const handleAutoRepair = useCallback(async (applyFixes: boolean) => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await api.saveConfig({ vm1, vm2, vm3 });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+      setSaving(false);
+      return;
+    }
+    setSaving(false);
+
+    setRepairing(applyFixes ? "fix" : "check");
+    setRepairReport(null);
+    try {
+      const report = await api.autoRepair(applyFixes);
+      setRepairReport(report);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRepairing(null);
     }
   }, [vm1, vm2, vm3]);
 
@@ -329,7 +356,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 vm={vm1}
                 result={vm1Result}
                 onChange={setVm1}
-                disabled={saving || testing}
+                disabled={saving || testing || repairing !== null}
               />
 
               <VmBlock
@@ -338,7 +365,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 vm={vm2}
                 result={vm2Result}
                 onChange={setVm2}
-                disabled={saving || testing}
+                disabled={saving || testing || repairing !== null}
               />
 
               <VmBlock
@@ -347,8 +374,99 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 vm={vm3}
                 result={vm3Result}
                 onChange={setVm3}
-                disabled={saving || testing}
+                disabled={saving || testing || repairing !== null}
               />
+
+              <div className="rounded-lg border border-vpn-border bg-black/20 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Wrench className="h-4 w-4 text-amber-400" />
+                    <span className="text-sm font-semibold text-slate-100">Protocol Auto Repair</span>
+                  </div>
+                  {repairReport && (
+                    <Badge
+                      variant={repairReport.summary.failed === 0 ? "success" : "destructive"}
+                      className="text-[10px]"
+                    >
+                      {repairReport.summary.failed === 0 ? "Ready" : `${repairReport.summary.failed} issue`}
+                    </Badge>
+                  )}
+                </div>
+
+                <p className="text-xs text-slate-500">
+                  Checks VM1, VM2, and VM3 prerequisites for WireGuard, OpenVPN, IPSec, iperf3, and Tailscale routes. Fix mode applies only known safe setup repairs.
+                </p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    className="gap-2 border-vpn-border text-slate-300 hover:bg-white/5"
+                    onClick={() => handleAutoRepair(false)}
+                    disabled={saving || testing || repairing !== null || !vm1.host || !vm2.host}
+                  >
+                    {repairing === "check" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <SearchCheck className="h-4 w-4" />
+                    )}
+                    Check
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="gap-2 border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
+                    onClick={() => handleAutoRepair(true)}
+                    disabled={saving || testing || repairing !== null || !vm1.host || !vm2.host}
+                  >
+                    {repairing === "fix" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Wrench className="h-4 w-4" />
+                    )}
+                    Fix
+                  </Button>
+                </div>
+
+                {repairReport && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-4 gap-2 text-center text-[10px]">
+                      <div className="rounded border border-vpn-border bg-black/20 px-2 py-1 text-slate-400">
+                        Total<br /><span className="text-slate-200">{repairReport.summary.total}</span>
+                      </div>
+                      <div className="rounded border border-vpn-green/30 bg-vpn-green/10 px-2 py-1 text-vpn-green">
+                        OK<br /><span>{repairReport.summary.ok}</span>
+                      </div>
+                      <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-300">
+                        Fixed<br /><span>{repairReport.summary.fixed}</span>
+                      </div>
+                      <div className="rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-red-300">
+                        Failed<br /><span>{repairReport.summary.failed}</span>
+                      </div>
+                    </div>
+
+                    <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
+                      {repairReport.items
+                        .filter((item) => !item.ok || item.fixed)
+                        .slice(0, 12)
+                        .map((item, idx) => (
+                          <div
+                            key={`${item.vm}-${item.protocol}-${item.check}-${idx}`}
+                            className={cn(
+                              "rounded border px-2 py-1.5 text-[10px]",
+                              item.ok
+                                ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                                : "border-red-500/30 bg-red-500/10 text-red-300",
+                            )}
+                          >
+                            <div className="font-mono uppercase text-slate-300">
+                              {item.vm} / {item.protocol} / {item.check}
+                            </div>
+                            <div className="mt-0.5 text-slate-400">{item.message}</div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {saveError && (
                 <Alert variant="destructive">
@@ -387,7 +505,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 variant="outline"
                 className="w-full gap-2 border-vpn-border text-slate-300 hover:bg-white/5"
                 onClick={handleTestConnectivity}
-                disabled={saving || testing || !vm1.host || !vm2.host}
+                disabled={saving || testing || repairing !== null || !vm1.host || !vm2.host}
               >
                 {testing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -401,7 +519,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 variant="success"
                 className="w-full gap-2"
                 onClick={handleSave}
-                disabled={saving || testing || !vm1.host || !vm2.host}
+                disabled={saving || testing || repairing !== null || !vm1.host || !vm2.host}
               >
                 {saving ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
