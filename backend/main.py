@@ -18,6 +18,7 @@ from backend.core.config import get_config
 from backend.core.logging import configure_logging, get_logger
 from backend.routers.config import router as config_router
 from backend.routers.tests import router as tests_router
+from backend.services.test_history import init_history_db
 from backend.services.ssh_manager import get_ssh_manager
 
 from dotenv import load_dotenv
@@ -79,6 +80,7 @@ def _init_runtime_config_from_env() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     cfg = get_config()
     _init_runtime_config_from_env()
+    await init_history_db()
     logger.info(
         "app_startup",
         host=cfg.backend.host,

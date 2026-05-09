@@ -5,7 +5,7 @@ import { useVpnWebSocket } from "@/hooks/useVpnWebSocket";
 import { api } from "@/services/api";
 import { Sidebar } from "@/components/Sidebar";
 import { LatencyChart } from "@/components/LatencyChart";
-import { ThroughputChart } from "@/components/ThroughputChart";
+import { SpeedTestPanel } from "@/components/SpeedTestPanel";
 import { SummaryTable } from "@/components/SummaryTable";
 import { RecommendationBanner } from "@/components/RecommendationBanner";
 
@@ -54,7 +54,7 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, delay: 0.1 }}
           >
-            <ThroughputChart />
+            <SpeedTestPanel />
           </motion.div>
         </div>
 

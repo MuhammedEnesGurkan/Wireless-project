@@ -15,7 +15,7 @@ import statistics
 import time
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from backend.core.config import get_config
@@ -27,6 +27,7 @@ from backend.models.schemas import (
     ProtocolTestResult,
     StartTestRequest,
     StopTestRequest,
+    TestHistoryRecord,
     TestPhase,
     TestStatusResponse,
     VpnProtocol,
@@ -39,6 +40,7 @@ from backend.models.schemas import (
 from backend.services.metrics_collector import MetricsCollector
 from backend.services.netem_manager import NetemManager
 from backend.services.ssh_manager import SshCommandError, get_ssh_manager
+from backend.services.test_history import list_history, safe_save_failure, safe_save_success
 from backend.services.vpn_manager import TunnelVerificationError, VpnManager
 
 logger = get_logger(__name__)
@@ -461,6 +463,25 @@ async def _run_test(condition: NetworkCondition, protocol: VpnProtocol, client_v
     protocols = (
         PROTOCOL_ORDER if protocol == VpnProtocol.ALL else [protocol]
     )
+    run_id = f"{int(time.time() * 1000)}-{client_vm.value}"
+    current_protocol = protocols[0] if protocols else protocol
+    protocol_started_at: dict[str, float] = {}
+    saved_success_protocols: set[str] = set()
+
+    async def save_completed_results() -> None:
+        if _state.results:
+            best = max(_state.results, key=lambda r: r.score)
+            best.recommended = True
+        for res in _state.results:
+            if res.protocol in saved_success_protocols:
+                continue
+            await safe_save_success(
+                run_id=run_id,
+                client_vm=client_vm.value,
+                result=res,
+                started_at=protocol_started_at.get(res.protocol, time.time()),
+            )
+            saved_success_protocols.add(res.protocol)
 
     _state.results.clear()
 
@@ -468,6 +489,8 @@ async def _run_test(condition: NetworkCondition, protocol: VpnProtocol, client_v
         for proto in protocols:
             if not _state.running:
                 break
+            current_protocol = proto
+            protocol_started_at[proto.value] = time.time()
             logger.info("test_start", protocol=proto, condition=condition_key)
             await send_status(
                 "starting",
@@ -481,6 +504,8 @@ async def _run_test(condition: NetworkCondition, protocol: VpnProtocol, client_v
         if _state.results:
             best = max(_state.results, key=lambda r: r.score)
             best.recommended = True
+
+        await save_completed_results()
 
         # Send final results
         for res in _state.results:
@@ -503,17 +528,62 @@ async def _run_test(condition: NetworkCondition, protocol: VpnProtocol, client_v
     except asyncio.CancelledError:
         logger.info("test_cancelled")
         await send_error("cancelled", "Test was stopped by user")
+        await save_completed_results()
+        await safe_save_failure(
+            run_id=run_id,
+            client_vm=client_vm.value,
+            protocol=current_protocol.value,
+            condition=condition_key,
+            status="cancelled",
+            phase=_state.phase.value,
+            error_message="Test was stopped by user",
+            started_at=protocol_started_at.get(current_protocol.value, time.time()),
+        )
         await _emergency_cleanup(protocols, condition_key, ssh_mgr, client_vm)
     except SshCommandError as exc:
         logger.error("ssh_error", exc=str(exc))
-        await send_error("ssh_error", _humanize_ssh_error(exc))
+        humanized = _humanize_ssh_error(exc)
+        await send_error("ssh_error", humanized)
+        await save_completed_results()
+        await safe_save_failure(
+            run_id=run_id,
+            client_vm=client_vm.value,
+            protocol=current_protocol.value,
+            condition=condition_key,
+            status="failed",
+            phase=_state.phase.value,
+            error_message=humanized,
+            started_at=protocol_started_at.get(current_protocol.value, time.time()),
+        )
         await _emergency_cleanup(protocols, condition_key, ssh_mgr, client_vm)
     except TunnelVerificationError as exc:
         logger.error("tunnel_error", exc=str(exc))
+        await save_completed_results()
+        await safe_save_failure(
+            run_id=run_id,
+            client_vm=client_vm.value,
+            protocol=current_protocol.value,
+            condition=condition_key,
+            status="failed",
+            phase=_state.phase.value,
+            error_message=str(exc),
+            started_at=protocol_started_at.get(current_protocol.value, time.time()),
+        )
         await _emergency_cleanup(protocols, condition_key, ssh_mgr, client_vm)
     except Exception as exc:  # noqa: BLE001
         logger.exception("test_error", exc=str(exc))
         await send_error("unknown", f"Unexpected error: {exc}")
+        await save_completed_results()
+        await safe_save_failure(
+            run_id=run_id,
+            client_vm=client_vm.value,
+            protocol=current_protocol.value,
+            condition=condition_key,
+            status="failed",
+            phase=_state.phase.value,
+            error_message=f"Unexpected error: {exc}",
+            started_at=protocol_started_at.get(current_protocol.value, time.time()),
+        )
         await _emergency_cleanup(protocols, condition_key, ssh_mgr, client_vm)
     finally:
         _state.running = False
@@ -610,6 +680,14 @@ async def test_status() -> TestStatusResponse:
         protocol=_state.protocol,
         condition=_state.condition,
     )
+
+
+@router.get("/api/test/history", response_model=list[TestHistoryRecord])
+async def test_history(
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[TestHistoryRecord]:
+    rows = await list_history(limit=limit)
+    return [TestHistoryRecord.model_validate(row) for row in rows]
 
 
 @router.get("/api/presets")

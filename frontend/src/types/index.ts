@@ -153,15 +153,21 @@ export interface ProtocolMeta {
 // ── Summary table row ──────────────────────────────────────────────────────────
 
 export interface SummaryRow {
-  run_id: number;
+  run_id: number | string;
   recorded_at: number;
+  client_vm?: string;
   protocol: string;
   condition: string;
+  status?: string;
+  phase?: string | null;
   avg_latency_ms: number;
   max_latency_ms: number;
   avg_throughput_mbps: number;
+  upload_mbps?: number;
+  download_mbps?: number;
   avg_cpu_percent: number;
   score: number;
   dpi_resistance_score: number;
   recommended: boolean;
+  error_message?: string | null;
 }

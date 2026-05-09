@@ -74,6 +74,28 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class TestHistoryRecord(BaseModel):
+    id: int
+    run_id: str
+    recorded_at: float
+    duration_sec: float | None = None
+    client_vm: str
+    protocol: str
+    condition: str
+    status: str
+    phase: str | None = None
+    avg_latency_ms: float = 0.0
+    max_latency_ms: float = 0.0
+    avg_throughput_mbps: float = 0.0
+    upload_mbps: float = 0.0
+    download_mbps: float = 0.0
+    avg_cpu_percent: float = 0.0
+    score: float = 0.0
+    dpi_resistance_score: float = 0.0
+    recommended: bool = False
+    error_message: str | None = None
+
+
 # ── WebSocket Message Types ────────────────────────────────────────────────────
 
 class WsStatusMessage(BaseModel):

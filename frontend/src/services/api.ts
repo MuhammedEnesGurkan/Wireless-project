@@ -90,6 +90,28 @@ export interface AutoRepairReport {
   items: AutoRepairItem[];
 }
 
+export interface TestHistoryRecord {
+  id: number;
+  run_id: string;
+  recorded_at: number;
+  duration_sec: number | null;
+  client_vm: string;
+  protocol: string;
+  condition: string;
+  status: string;
+  phase: string | null;
+  avg_latency_ms: number;
+  max_latency_ms: number;
+  avg_throughput_mbps: number;
+  upload_mbps: number;
+  download_mbps: number;
+  avg_cpu_percent: number;
+  score: number;
+  dpi_resistance_score: number;
+  recommended: boolean;
+  error_message: string | null;
+}
+
 export const api = {
   startTest: (payload: StartTestPayload): Promise<StartTestResponse> =>
     request("/api/test/start", {
@@ -105,6 +127,9 @@ export const api = {
 
   getStatus: (): Promise<TestStatusResponse> =>
     request("/api/test/status"),
+
+  getTestHistory: (limit = 100): Promise<TestHistoryRecord[]> =>
+    request(`/api/test/history?limit=${limit}`),
 
   getPresets: (): Promise<PresetsMap> =>
     request("/api/presets"),

@@ -13,9 +13,9 @@ import type { WsMessage } from "@/types";
 import { useStore } from "@/store";
 
 const WS_URL: string = (import.meta.env.VITE_WS_URL as string | undefined) ?? "ws://localhost:8000/ws/test";
-const MAX_RECONNECT_ATTEMPTS = 3;
 const HEARTBEAT_MS = 15_000;
 const BASE_RECONNECT_DELAY_MS = 2_000;
+const MAX_RECONNECT_DELAY_MS = 15_000;
 
 // ── Module-level singleton so StrictMode double-mount is harmless ─────────────
 let _ws: WebSocket | null = null;
@@ -108,23 +108,18 @@ function connect() {
     // Normal closure (code 1000) or no active mounts — don't reconnect
     if (ev.code === 1000 || _mountCount === 0) return;
 
-    if (_reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-      const delay = BASE_RECONNECT_DELAY_MS * Math.pow(2, _reconnectAttempts);
-      _reconnectAttempts += 1;
-      getActions().appendLog({
-        message: `⚠️ Disconnected — reconnecting in ${delay / 1000}s (${_reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})…`,
-        phase: "idle",
-        status: "pending",
-      });
-      clearReconnect();
-      _reconnectTimer = setTimeout(connect, delay);
-    } else {
-      getActions().appendLog({
-        message: "❌ Could not reconnect to backend. Refresh the page to retry.",
-        phase: "error",
-        status: "error",
-      });
-    }
+    const delay = Math.min(
+      BASE_RECONNECT_DELAY_MS * Math.pow(2, _reconnectAttempts),
+      MAX_RECONNECT_DELAY_MS,
+    );
+    _reconnectAttempts += 1;
+    getActions().appendLog({
+      message: `⚠️ Disconnected — reconnecting in ${delay / 1000}s…`,
+      phase: "idle",
+      status: "pending",
+    });
+    clearReconnect();
+    _reconnectTimer = setTimeout(connect, delay);
   };
 
   ws.onerror = () => {
