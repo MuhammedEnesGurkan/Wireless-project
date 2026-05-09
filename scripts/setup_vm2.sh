@@ -109,6 +109,8 @@ tls-auth ${OVPN_CLIENT_DIR}/ta.key 1
 cipher AES-256-GCM
 auth   SHA256
 compress lz4-v2
+tun-mtu 1200
+mssfix 1100
 verb 3
 EOF
 
@@ -128,6 +130,8 @@ tls-auth ${OVPN_CLIENT_DIR}/ta.key 1
 cipher AES-256-GCM
 auth   SHA256
 compress lz4-v2
+tun-mtu 1200
+mssfix 1100
 verb 3
 EOF
 

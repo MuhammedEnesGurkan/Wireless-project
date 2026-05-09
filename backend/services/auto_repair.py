@@ -310,7 +310,7 @@ class AutoRepairManager:
             "cert /etc/openvpn/client/vpn-client.crt\\n"
             "key /etc/openvpn/client/vpn-client.key\\n"
             "tls-auth /etc/openvpn/client/ta.key 1\\n"
-            "cipher AES-256-GCM\\nauth SHA256\\ncompress lz4-v2\\nverb 3\\n' "
+            "cipher AES-256-GCM\\nauth SHA256\\ncompress lz4-v2\\ntun-mtu 1200\\nmssfix 1100\\nverb 3\\n' "
             f"| sudo tee /etc/openvpn/client/{conf_name} >/dev/null"
         )
 
