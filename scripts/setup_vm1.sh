@@ -27,6 +27,7 @@ IFACE="${IFACE:-tailscale0}"
 WG_SERVER_IP="${WG_SERVER_IP:-10.200.0.1/24}"
 WG_CLIENT_IP="${WG_CLIENT_IP:-10.200.0.2/32}"
 WG_PORT="${WG_PORT:-51820}"
+WG_MTU="${WG_MTU:-1200}"
 
 OVPN_UDP_PORT="${OVPN_UDP_PORT:-1194}"
 OVPN_TCP_PORT="${OVPN_TCP_PORT:-1194}"
@@ -107,6 +108,7 @@ setup_wireguard() {
 Address = ${WG_SERVER_IP}
 ListenPort = ${WG_PORT}
 PrivateKey = ${SERVER_PRIVKEY}
+MTU = ${WG_MTU}
 PostUp   = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o ${IFACE} -j MASQUERADE
 PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o ${IFACE} -j MASQUERADE
 

@@ -23,6 +23,9 @@ VM1_IP="${VM1_IP:-100.70.73.68}"
 IFACE="${IFACE:-tailscale0}"
 OVPN_CLIENT_DIR="${OVPN_CLIENT_DIR:-/etc/openvpn/client}"
 WG_PORT="${WG_PORT:-51820}"
+WG_CLIENT_ADDR="${WG_CLIENT_ADDR:-10.200.0.3/24}"
+WG_ALLOWED_IPS="${WG_ALLOWED_IPS:-10.200.0.1/32}"
+WG_MTU="${WG_MTU:-1200}"
 
 info()  { echo -e "\033[0;32m[INFO]\033[0m  $*"; }
 warn()  { echo -e "\033[0;33m[WARN]\033[0m  $*"; }
@@ -80,13 +83,14 @@ setup_wireguard_client() {
 
   cat > /etc/wireguard/wg0.conf <<WG_CONF
 [Interface]
-Address    = 10.200.0.2/24
+Address    = ${WG_CLIENT_ADDR}
 PrivateKey = ${CLIENT_PRIVKEY}
+MTU = ${WG_MTU}
 
 [Peer]
 PublicKey  = ${SERVER_PUBKEY}
 Endpoint   = ${VM1_IP}:${WG_PORT}
-AllowedIPs = 10.200.0.0/24
+AllowedIPs = ${WG_ALLOWED_IPS}
 PersistentKeepalive = 25
 WG_CONF
 

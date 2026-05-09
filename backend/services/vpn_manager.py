@@ -48,6 +48,16 @@ class VpnManager:
         logger.info("vpn_server_start", protocol=protocol, service=service)
         if protocol == VpnProtocol.IPSEC:
             await self._ssh.run_vm1(self._ipsec_service_action_cmd("start"))
+        elif protocol == VpnProtocol.WIREGUARD:
+            iface = self._cfg.vpn.wireguard.server_interface
+            await self._ssh.run_vm1(
+                "sudo sed -i '/^MTU[[:space:]]*=/d' /etc/wireguard/"
+                f"{iface}.conf; "
+                "sudo sed -i '/^\\[Interface\\]/a MTU = 1200' /etc/wireguard/"
+                f"{iface}.conf; "
+                f"sudo systemctl restart {service} || "
+                f"(sudo wg-quick down {iface} 2>/dev/null || true; sudo wg-quick up {iface})"
+            )
         else:
             await self._ssh.run_vm1(f"sudo systemctl start {service}")
         await asyncio.sleep(1)  # Give service a moment to bind
@@ -133,8 +143,17 @@ class VpnManager:
         match protocol:
             case VpnProtocol.WIREGUARD:
                 iface = self._cfg.vpn.wireguard.client_interface
+                server_ip = self._cfg.vpn.wireguard.server_vpn_ip
                 # Bring down first in case it's already up from a previous unclean run
-                return f"sudo wg-quick down {iface} 2>/dev/null || true; sudo wg-quick up {iface}"
+                return (
+                    "sudo sed -i '/^MTU[[:space:]]*=/d' /etc/wireguard/"
+                    f"{iface}.conf; "
+                    "sudo sed -i '/^\\[Interface\\]/a MTU = 1200' /etc/wireguard/"
+                    f"{iface}.conf; "
+                    f"sudo wg-quick down {iface} 2>/dev/null || true; "
+                    f"sudo wg-quick up {iface}; "
+                    f"ping -c 1 -W 2 {server_ip} >/dev/null 2>&1 || true"
+                )
             case VpnProtocol.OPENVPN_UDP:
                 conf = self._cfg.vpn.openvpn_udp.client_config
                 return self._openvpn_client_cmd(conf, "/tmp/ovpn-udp.log")

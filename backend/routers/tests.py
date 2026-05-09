@@ -412,6 +412,7 @@ async def _run_single_protocol(
     await send_status("running_throughput", "Running throughput test (iperf3)…")
     await send_status("running_throughput", f"VM1$ iperf3 -s -p {cfg.infrastructure.vm1.iperf3_port} -D --logfile /tmp/iperf3.log")
     await send_status("running_throughput", f"{client_vm.value.upper()}$ {iperf_cmd}")
+    await send_status("running_throughput", f"VM1$ iperf3 -s -p {cfg.infrastructure.vm1.iperf3_port} -D --logfile /tmp/iperf3.log")
     await send_status("running_throughput", f"{client_vm.value.upper()}$ {iperf_cmd} -R")
     await send_progress(75, "Measuring throughput")
 

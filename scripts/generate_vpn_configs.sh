@@ -35,8 +35,11 @@ SSH_KEY="${SSH_KEY:-~/.ssh/vpn_bench_key}"
 
 WG_PORT="${WG_PORT:-51820}"
 WG_SERVER_ADDR="${WG_SERVER_ADDR:-10.200.0.1/24}"
-WG_CLIENT_ADDR="${WG_CLIENT_ADDR:-10.200.0.2/24}"
-WG_CLIENT_IP_ONLY="${WG_CLIENT_IP_ONLY:-10.200.0.2/32}"
+WG_VM2_ADDR="${WG_VM2_ADDR:-10.200.0.2/24}"
+WG_VM2_IP_ONLY="${WG_VM2_IP_ONLY:-10.200.0.2/32}"
+WG_VM3_ADDR="${WG_VM3_ADDR:-10.200.0.3/24}"
+WG_VM3_IP_ONLY="${WG_VM3_IP_ONLY:-10.200.0.3/32}"
+WG_MTU="${WG_MTU:-1200}"
 
 IFACE="${IFACE:-tailscale0}"
 
@@ -57,6 +60,14 @@ collect_keys() {
   info "Fetching VM2 WireGuard public key…"
   VM2_WG_PUB=$(ssh_vm2 "sudo cat /etc/wireguard/client_public.key")
   info "VM2 pubkey: ${VM2_WG_PUB}"
+
+  if [[ -n "${VM3_HOST}" ]]; then
+    info "Fetching VM3 WireGuard public key…"
+    VM3_WG_PUB=$(ssh_vm3 "sudo cat /etc/wireguard/client_public.key")
+    info "VM3 pubkey: ${VM3_WG_PUB}"
+  else
+    VM3_WG_PUB=""
+  fi
 }
 
 # ── 2. Write WireGuard configs ─────────────────────────────────────────────────
@@ -69,31 +80,63 @@ configure_wireguard() {
 Address    = ${WG_SERVER_ADDR}
 ListenPort = ${WG_PORT}
 PrivateKey = ${VM1_PRIVKEY}
+MTU = ${WG_MTU}
 PostUp   = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o ${IFACE} -j MASQUERADE
 PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o ${IFACE} -j MASQUERADE
 
 [Peer]
 PublicKey  = ${VM2_WG_PUB}
-AllowedIPs = ${WG_CLIENT_IP_ONLY}
+AllowedIPs = ${WG_VM2_IP_ONLY}
 WG_CONF
+
+  if [[ -n "${VM3_WG_PUB:-}" ]]; then
+    ssh_vm1 "sudo tee -a /etc/wireguard/wg0.conf > /dev/null" <<WG_CONF
+
+[Peer]
+PublicKey  = ${VM3_WG_PUB}
+AllowedIPs = ${WG_VM3_IP_ONLY}
+WG_CONF
+  fi
 
   info "Writing WireGuard client config on VM2…"
   VM2_PRIVKEY=$(ssh_vm2 "sudo cat /etc/wireguard/client_private.key")
 
   ssh_vm2 "sudo tee /etc/wireguard/wg0.conf > /dev/null" <<WG_CONF
 [Interface]
-Address    = ${WG_CLIENT_ADDR}
+Address    = ${WG_VM2_ADDR}
 PrivateKey = ${VM2_PRIVKEY}
+MTU = ${WG_MTU}
 
 [Peer]
 PublicKey  = ${VM1_WG_PUB}
 Endpoint   = ${VM1_HOST}:${WG_PORT}
-AllowedIPs = 10.200.0.0/24
+AllowedIPs = 10.200.0.1/32
 PersistentKeepalive = 25
 WG_CONF
 
+  if [[ -n "${VM3_WG_PUB:-}" ]]; then
+    info "Writing WireGuard client config on VM3…"
+    VM3_PRIVKEY=$(ssh_vm3 "sudo cat /etc/wireguard/client_private.key")
+
+    ssh_vm3 "sudo tee /etc/wireguard/wg0.conf > /dev/null" <<WG_CONF
+[Interface]
+Address    = ${WG_VM3_ADDR}
+PrivateKey = ${VM3_PRIVKEY}
+MTU = ${WG_MTU}
+
+[Peer]
+PublicKey  = ${VM1_WG_PUB}
+Endpoint   = ${VM1_HOST}:${WG_PORT}
+AllowedIPs = 10.200.0.1/32
+PersistentKeepalive = 25
+WG_CONF
+  fi
+
   ssh_vm1 "sudo chmod 600 /etc/wireguard/wg0.conf"
   ssh_vm2 "sudo chmod 600 /etc/wireguard/wg0.conf"
+  if [[ -n "${VM3_WG_PUB:-}" ]]; then
+    ssh_vm3 "sudo chmod 600 /etc/wireguard/wg0.conf"
+  fi
   info "WireGuard configs exchanged ✓"
 }
 
@@ -188,6 +231,18 @@ smoke_test() {
     info "WireGuard tunnel working ✓"
   else
     echo "[WARN] WireGuard ping failed — check firewall / routing."
+  fi
+
+  if [[ -n "${VM3_WG_PUB:-}" ]]; then
+    ssh_vm3 "sudo wg-quick up wg0 2>/dev/null || true"
+    sleep 2
+    info "Pinging VM1 WireGuard IP from VM3…"
+    if ssh_vm3 "ping -c 3 -W 3 10.200.0.1" &>/dev/null; then
+      info "WireGuard VM3 tunnel working ✓"
+    else
+      echo "[WARN] VM3 WireGuard ping failed — check WSL/Tailscale MTU and peer keys."
+    fi
+    ssh_vm3 "sudo wg-quick down wg0 2>/dev/null || true"
   fi
 
   ssh_vm2 "sudo wg-quick down wg0 2>/dev/null || true"

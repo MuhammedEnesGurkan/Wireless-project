@@ -96,8 +96,6 @@ class MetricsCollector:
         duration = cfg.iperf3_duration_sec
         parallel = cfg.iperf3_parallel
 
-        await self._start_iperf3_server(iperf_port)
-
         if protocol == "ipsec":
             await self._ensure_ipsec_route(server_ip)
 
@@ -136,7 +134,7 @@ class MetricsCollector:
         )
         await callback(msg.model_dump())
 
-        # Stop iperf3 server
+        # Best-effort cleanup in case an interrupted test left a daemon behind.
         await self._ssh.run_vm1("pkill iperf3 2>/dev/null || true", check=False)
 
         logger.info(
@@ -160,6 +158,7 @@ class MetricsCollector:
         last_error: Exception | None = None
         for attempt in range(1, 3):
             try:
+                await self._start_iperf3_server(port)
                 return await self._run_iperf3_once(
                     direction=direction,
                     server_ip=server_ip,
@@ -177,7 +176,6 @@ class MetricsCollector:
                     exc=str(exc),
                 )
                 if attempt == 1:
-                    await self._start_iperf3_server(port)
                     await asyncio.sleep(1)
         assert last_error is not None
         raise last_error
@@ -193,12 +191,15 @@ class MetricsCollector:
         reverse: bool = False,
     ) -> float:
         rev_flag = "-R" if reverse else ""
-        # Short test duration (10s) needs less buffer, but still enough for JSON exchange
-        timeout_sec = duration + 20
+        # VM3 commonly runs under WSL2/Tailscale, where the final iperf3 JSON
+        # control message can arrive late when the path is lossy or MTU-sensitive.
+        timeout_sec = duration + (35 if self._client_vm == "vm3" else 20)
+        # iperf3 expects --connect-timeout in milliseconds, not seconds.
+        connect_timeout_ms = 10000 if self._client_vm == "vm3" else 5000
         cmd = (
             f"timeout {timeout_sec} "
             f"iperf3 -c {server_ip} -p {port} -t {duration} "
-            f"--connect-timeout 5 "
+            f"--connect-timeout {connect_timeout_ms} "
             f"-P {parallel} -J {rev_flag}"
         )
         result = await self._run_client(cmd, check=False)
@@ -250,7 +251,7 @@ class MetricsCollector:
             f"sudo rm -f /tmp/iperf3.log; "
             f"sudo iperf3 -s -p {port} -D --logfile /tmp/iperf3.log; "
             "sleep 1; "
-            f"sudo ss -ltnp | grep -q ':{port} ' || "
+            f"sudo ss -ltn sport = :{port} | grep -q ':{port}' || "
             f"(sudo cat /tmp/iperf3.log >&2 2>/dev/null; exit 1)"
         )
 

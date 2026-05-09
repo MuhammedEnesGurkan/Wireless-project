@@ -23,6 +23,7 @@ IFACE="${IFACE:-tailscale0}"
 KEY_DIR="${KEY_DIR:-/etc/vpn-bench/keys}"
 OVPN_CLIENT_DIR="${OVPN_CLIENT_DIR:-/etc/openvpn/client}"
 WG_PORT="${WG_PORT:-51820}"
+WG_MTU="${WG_MTU:-1200}"
 
 info()  { echo -e "\033[0;32m[INFO]\033[0m  $*"; }
 error() { echo -e "\033[0;31m[ERROR]\033[0m $*" >&2; exit 1; }
@@ -76,11 +77,12 @@ setup_wireguard_client() {
 [Interface]
 Address    = 10.200.0.2/24
 PrivateKey = ${CLIENT_PRIVKEY}
+MTU = ${WG_MTU}
 
 [Peer]
 PublicKey  = ${SERVER_PUBKEY}
 Endpoint   = ${VM1_IP}:${WG_PORT}
-AllowedIPs = 10.200.0.0/24
+AllowedIPs = 10.200.0.1/32
 PersistentKeepalive = 25
 WG_CONF
 
