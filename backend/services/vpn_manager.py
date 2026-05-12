@@ -51,6 +51,8 @@ class VpnManager:
         elif protocol == VpnProtocol.WIREGUARD:
             iface = self._cfg.vpn.wireguard.server_interface
             await self._ssh.run_vm1(
+                "sudo iptables -I INPUT -s 10.200.0.0/24 -p icmp -j ACCEPT 2>/dev/null || true; "
+                "sudo iptables -I INPUT -s 10.200.0.0/24 -p tcp --dport 5201 -j ACCEPT 2>/dev/null || true; "
                 "sudo sed -i '/^MTU[[:space:]]*=/d' /etc/wireguard/"
                 f"{iface}.conf; "
                 "sudo sed -i '/^\\[Interface\\]/a MTU = 1200' /etc/wireguard/"
